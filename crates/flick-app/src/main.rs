@@ -131,7 +131,8 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
             let window = window::WindowHandle::from_creation_context(cc)?;
-            let hotkey = hotkey::register(&config.hotkey, window, ctx.clone());
+            let shown = Arc::new(AtomicBool::new(false));
+            let hotkey = hotkey::register(&config.hotkey, window, shown.clone(), ctx.clone());
             let hotkey_error = hotkey.as_ref().err().map(|e| format!("{e:#}"));
             if let Some(e) = &hotkey_error {
                 log::error!("hotkey {:?}: {e}", config.hotkey);
@@ -171,6 +172,7 @@ fn main() -> eframe::Result {
                 ui::Background {
                     index_updated: reindexer.updated,
                     quit,
+                    shown,
                     window,
                     hotkey: hotkey.ok(),
                     tray,

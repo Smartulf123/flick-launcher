@@ -1,5 +1,8 @@
 //! The global hotkey that shows the search bar.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use anyhow::Context as _;
 use eframe::egui;
 use global_hotkey::hotkey::HotKey;
@@ -14,13 +17,15 @@ pub fn parse(hotkey: &str) -> anyhow::Result<HotKey> {
         .with_context(|| format!("hotkey {hotkey:?} is not valid"))
 }
 
-/// Registers `hotkey` system-wide. Pressing it shows and focuses `window`.
+/// Registers `hotkey` system-wide. Pressing it sets `shown` (so the app
+/// resets the bar), then shows and focuses `window`.
 ///
 /// Must run on the event-loop thread (the eframe creation closure), and the
 /// returned manager must be kept alive for the hotkey to stay registered.
 pub fn register(
     hotkey: &str,
     window: WindowHandle,
+    shown: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> anyhow::Result<GlobalHotKeyManager> {
     let hotkey = parse(hotkey)?;
@@ -30,6 +35,7 @@ pub fn register(
         .context("the hotkey is already used by another program")?;
     GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
         if event.state == HotKeyState::Pressed {
+            shown.store(true, Ordering::Relaxed);
             window.show_and_focus();
             ctx.request_repaint();
         }

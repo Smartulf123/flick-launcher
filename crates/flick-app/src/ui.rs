@@ -21,6 +21,8 @@ pub struct Background {
     pub index_updated: Arc<AtomicBool>,
     /// Set by the tray's Quit item.
     pub quit: Arc<AtomicBool>,
+    /// Set by the hotkey handler each time it shows the bar.
+    pub shown: Arc<AtomicBool>,
     pub window: WindowHandle,
     /// Keeps the hotkey registered; `None` if registration failed.
     pub hotkey: Option<GlobalHotKeyManager>,
@@ -28,9 +30,17 @@ pub struct Background {
     pub tray: Option<TrayIcon>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Visibility {
+    Shown,
+    Hidden,
+}
+
 pub struct FlickApp {
     launcher: Launcher,
     background: Background,
+    /// Keys held back one frame because text was typed before them.
+    pending: Vec<Intent>,
     height: f32,
     was_focused: bool,
 }
@@ -40,24 +50,30 @@ impl FlickApp {
         Self {
             launcher,
             background,
+            pending: Vec::new(),
             height: BAR_HEIGHT,
             was_focused: false,
         }
     }
 
-    fn apply(&mut self, effect: Effect) {
+    fn apply(&mut self, effect: Effect) -> Visibility {
         match effect {
             Effect::Run(action) => {
                 if let Err(e) = run_action(&action) {
                     log::error!("could not open {action:?}: {e}");
                 }
+                Visibility::Shown
             }
-            Effect::Hide => self.hide(),
+            Effect::Hide => {
+                self.hide();
+                Visibility::Hidden
+            }
         }
     }
 
     fn hide(&mut self) {
         self.launcher.reset();
+        self.pending.clear();
         self.was_focused = false;
         self.background.window.hide();
     }
@@ -117,6 +133,11 @@ impl eframe::App for FlickApp {
             self.background.hotkey = None;
             std::process::exit(0);
         }
+        if self.background.shown.swap(false, Ordering::Relaxed) {
+            // Every show starts empty, whatever happened before the last hide.
+            self.launcher.reset();
+            self.pending.clear();
+        }
         if self.background.index_updated.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();
         }
@@ -129,9 +150,20 @@ impl eframe::App for FlickApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        for intent in read_intents(&ctx) {
-            for effect in self.launcher.handle(intent) {
-                self.apply(effect);
+        let keys = read_intents(&ctx);
+        self.pending.extend(keys.intents);
+        if keys.after_text {
+            // Let the text box take this frame's typing first; run the keys next frame.
+            ctx.request_repaint();
+        } else {
+            for intent in std::mem::take(&mut self.pending) {
+                for effect in self.launcher.handle(intent) {
+                    if self.apply(effect) == Visibility::Hidden {
+                        // Drop the rest of this frame, typing included, so
+                        // nothing leaks into the next show.
+                        return;
+                    }
+                }
             }
         }
         egui::Frame::central_panel(ui.style()).show(ui, |ui| self.draw(ui));
@@ -139,27 +171,60 @@ impl eframe::App for FlickApp {
     }
 }
 
+/// The launcher's keys pressed in one frame, in press order.
+#[derive(Debug, Default)]
+pub struct FrameKeys {
+    pub intents: Vec<Intent>,
+    /// Text was typed before the first key. The text box only sees that
+    /// text later in the frame, so the keys must wait one frame.
+    pub after_text: bool,
+}
+
 /// Takes the launcher's keys out of the input queue before any widget sees
-/// them, so the text box never loses focus to Tab. Shift+Tab goes first
-/// because a plain-Tab match also accepts Shift.
-pub fn read_intents(ctx: &egui::Context) -> Vec<Intent> {
-    const KEYS: [(Modifiers, Key, Intent); 6] = [
-        (Modifiers::SHIFT, Key::Tab, Intent::ShiftTab),
-        (Modifiers::NONE, Key::Tab, Intent::Tab),
-        (Modifiers::NONE, Key::ArrowUp, Intent::Up),
-        (Modifiers::NONE, Key::ArrowDown, Intent::Down),
-        (Modifiers::NONE, Key::Enter, Intent::Enter),
-        (Modifiers::NONE, Key::Escape, Intent::Escape),
-    ];
+/// them, so the text box never loses focus to Tab.
+pub fn read_intents(ctx: &egui::Context) -> FrameKeys {
     ctx.input_mut(|input| {
-        let mut intents = Vec::new();
-        for (modifiers, key, intent) in KEYS {
-            while input.consume_key(modifiers, key) {
-                intents.push(intent);
+        let mut keys = FrameKeys::default();
+        let mut seen_text = false;
+        input.events.retain(|event| match event {
+            egui::Event::Text(_) => {
+                seen_text = true;
+                true
             }
-        }
-        intents
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } => match intent_for(*key, *modifiers) {
+                Some(intent) => {
+                    if keys.intents.is_empty() {
+                        keys.after_text = seen_text;
+                    }
+                    keys.intents.push(intent);
+                    false
+                }
+                None => true,
+            },
+            _ => true,
+        });
+        keys
     })
+}
+
+fn intent_for(key: Key, modifiers: Modifiers) -> Option<Intent> {
+    if modifiers.ctrl || modifiers.alt || modifiers.command {
+        return None;
+    }
+    match key {
+        Key::Tab if modifiers.shift => Some(Intent::ShiftTab),
+        Key::Tab => Some(Intent::Tab),
+        Key::ArrowUp => Some(Intent::Up),
+        Key::ArrowDown => Some(Intent::Down),
+        Key::Enter => Some(Intent::Enter),
+        Key::Escape => Some(Intent::Escape),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -177,17 +242,49 @@ mod tests {
         }
     }
 
-    fn intents_for(events: Vec<Event>) -> Vec<Intent> {
+    fn keys_for(events: Vec<Event>) -> FrameKeys {
         let ctx = egui::Context::default();
         let raw = RawInput {
             events,
             ..Default::default()
         };
-        let mut out = Vec::new();
+        let mut out = FrameKeys::default();
         ctx.run_ui(raw, |ui| out = read_intents(ui.ctx()))
             .textures_delta
             .clear();
         out
+    }
+
+    fn intents_for(events: Vec<Event>) -> Vec<Intent> {
+        keys_for(events).intents
+    }
+
+    #[test]
+    fn intents_keep_press_order() {
+        assert_eq!(
+            intents_for(vec![
+                press(Key::ArrowDown, Modifiers::NONE),
+                press(Key::ArrowUp, Modifiers::NONE),
+            ]),
+            vec![Intent::Down, Intent::Up]
+        );
+    }
+
+    #[test]
+    fn key_after_typed_text_is_flagged() {
+        // "rust" + Enter rolled into one frame: the `t` reaches the text box
+        // after this function runs, so Enter must wait a frame.
+        let keys = keys_for(vec![
+            Event::Text("t".into()),
+            press(Key::Enter, Modifiers::NONE),
+        ]);
+        assert_eq!(keys.intents, vec![Intent::Enter]);
+        assert!(keys.after_text);
+    }
+
+    #[test]
+    fn key_alone_is_not_flagged() {
+        assert!(!keys_for(vec![press(Key::Enter, Modifiers::NONE)]).after_text);
     }
 
     #[test]
@@ -224,6 +321,8 @@ mod tests {
         };
         let mut still_there = true;
         let mut output = ctx.run_ui(raw, |ui| {
+            // What actually keeps focus in the text box is `request_focus()` in
+            // `draw`; this only checks that no widget sees the Tab press.
             read_intents(ui.ctx());
             still_there = ui.ctx().input(|i| i.key_pressed(Key::Tab));
         });
