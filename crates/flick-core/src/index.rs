@@ -37,12 +37,16 @@ impl FileIndex {
                         .iter()
                         .any(|x| e.file_name().to_string_lossy() == x.as_str()))
             });
-            entries.extend(walker.filter_map(Result::ok).map(|e| FileEntry {
-                name: e.file_name().to_string_lossy().into_owned(),
-                is_dir: e.file_type().is_dir(),
-                path: e.into_path(),
+            entries.extend(walker.filter_map(Result::ok).map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let is_dir = e.file_type().is_dir();
+                let mut path = e.into_path();
+                path.shrink_to_fit();
+                FileEntry { path, name, is_dir }
             }));
         }
+        // The index lives for the whole session; drop the growth slack.
+        entries.shrink_to_fit();
         FileIndex { entries }
     }
 }
@@ -133,6 +137,13 @@ mod tests {
             &excludes(),
         );
         assert!(idx.entries.iter().any(|e| e.name == "notes.txt"));
+    }
+
+    #[test]
+    fn built_index_keeps_no_spare_capacity() {
+        let f = fixture();
+        let idx = FileIndex::build(std::slice::from_ref(&f.root), &excludes());
+        assert_eq!(idx.entries.capacity(), idx.entries.len());
     }
 
     #[test]
