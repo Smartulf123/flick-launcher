@@ -4,7 +4,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 
 use crate::index::{FileEntry, SharedIndex};
-use crate::mode::{Action, ResultItem, SearchMode};
+use crate::mode::{Action, ResultItem, ResultKind, SearchMode};
 
 /// Title of the single row shown before the first index build finishes.
 pub const INDEXING_TITLE: &str = "Indexing files...";
@@ -49,6 +49,7 @@ impl SearchMode for FilesMode {
                 subtitle: String::new(),
                 score: 0,
                 action: Action::None,
+                kind: ResultKind::Info,
             }];
         };
 
@@ -69,6 +70,11 @@ impl SearchMode for FilesMode {
                     .unwrap_or_default(),
                 score,
                 action: Action::OpenPath(entry.path.clone()),
+                kind: if entry.is_dir {
+                    ResultKind::Folder
+                } else {
+                    ResultKind::File
+                },
             })
             .collect()
     }
@@ -78,7 +84,7 @@ impl SearchMode for FilesMode {
 mod tests {
     use super::*;
     use crate::index::{FileEntry, FileIndex, SharedIndex};
-    use crate::mode::{Action, ResultItem, SearchMode};
+    use crate::mode::{Action, ResultItem, ResultKind, SearchMode};
     use std::path::PathBuf;
 
     fn mode_with(names: &[&str]) -> FilesMode {
@@ -138,8 +144,32 @@ mod tests {
                 subtitle: String::new(),
                 score: 0,
                 action: Action::None,
+                kind: ResultKind::Info,
             }]
         );
+    }
+
+    #[test]
+    fn folders_and_files_have_their_kind() {
+        let shared = SharedIndex::default();
+        *shared.write().unwrap() = Some(FileIndex {
+            entries: vec![
+                FileEntry {
+                    path: PathBuf::from(r"C:\test\Budgets"),
+                    name: "Budgets".into(),
+                    is_dir: true,
+                },
+                FileEntry {
+                    path: PathBuf::from(r"C:\test\budget.xlsx"),
+                    name: "budget.xlsx".into(),
+                    is_dir: false,
+                },
+            ],
+        });
+        let r = FilesMode::new(shared).query("budget", 8);
+        let kind_of = |title: &str| r.iter().find(|i| i.title == title).unwrap().kind;
+        assert_eq!(kind_of("Budgets"), ResultKind::Folder);
+        assert_eq!(kind_of("budget.xlsx"), ResultKind::File);
     }
 
     #[test]

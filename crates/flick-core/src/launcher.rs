@@ -64,6 +64,11 @@ impl Launcher {
         self.selected
     }
 
+    /// Selects result `index`, clamped to the last result (for mouse hover and click).
+    pub fn select(&mut self, index: usize) {
+        self.selected = index.min(self.results.len().saturating_sub(1));
+    }
+
     /// The mode that answers the current input (a prefix overrides the active mode).
     pub fn effective_mode_name(&self) -> &str {
         self.registry.mode(self.effective_mode()).name()
@@ -75,20 +80,8 @@ impl Launcher {
             Intent::Down => {
                 self.selected = (self.selected + 1).min(self.results.len().saturating_sub(1));
             }
-            Intent::Tab | Intent::ShiftTab => {
-                let current = self.effective_mode();
-                self.active = if intent == Intent::Tab {
-                    self.registry.next(current)
-                } else {
-                    self.registry.prev(current)
-                };
-                let text = self
-                    .registry
-                    .parse(&self.input, self.active)
-                    .text
-                    .to_owned();
-                self.set_input(&text);
-            }
+            Intent::Tab => self.select_mode(self.registry.next(self.effective_mode())),
+            Intent::ShiftTab => self.select_mode(self.registry.prev(self.effective_mode())),
             Intent::Enter => {
                 let action = match self.results.get(self.selected) {
                     Some(item) if item.action != Action::None => item.action.clone(),
@@ -120,8 +113,29 @@ impl Launcher {
         self.active = self.default_mode;
     }
 
-    fn effective_mode(&self) -> usize {
+    /// Every mode's name and keyword, in Tab order.
+    pub fn modes(&self) -> Vec<(&str, &str)> {
+        (0..self.registry.len())
+            .map(|i| (self.registry.mode(i).name(), self.registry.keyword(i)))
+            .collect()
+    }
+
+    /// Index (into `modes()`) of the mode that answers the current input.
+    pub fn effective_mode(&self) -> usize {
         self.registry.parse(&self.input, self.active).mode
+    }
+
+    /// Makes `index` the active mode, dropping any typed prefix but keeping
+    /// the search text. Panics if `index` is out of range.
+    pub fn select_mode(&mut self, index: usize) {
+        assert!(index < self.registry.len(), "no mode {index}");
+        let text = self
+            .registry
+            .parse(&self.input, self.active)
+            .text
+            .to_owned();
+        self.active = index;
+        self.set_input(&text);
     }
 
     fn run_query(&mut self) {
@@ -216,6 +230,41 @@ mod tests {
         assert_eq!(l.selected(), 2);
         l.set_input("f es");
         assert_eq!(l.selected(), 0);
+    }
+
+    #[test]
+    fn select_picks_a_row_and_clamps() {
+        let mut l = launcher();
+        l.set_input("f e");
+        l.select(1);
+        assert_eq!(l.selected(), 1);
+        l.select(99);
+        assert_eq!(l.selected(), 2);
+    }
+
+    #[test]
+    fn lists_modes_with_keywords_in_tab_order() {
+        assert_eq!(
+            launcher().modes(),
+            vec![("Google", "g"), ("YouTube", "yt"), ("Files", "f")]
+        );
+    }
+
+    #[test]
+    fn effective_mode_follows_prefix() {
+        let mut l = launcher();
+        assert_eq!(l.effective_mode(), 0);
+        l.set_input("f notes");
+        assert_eq!(l.effective_mode(), 2);
+    }
+
+    #[test]
+    fn select_mode_switches_and_strips_prefix() {
+        let mut l = launcher();
+        l.set_input("yt notes");
+        l.select_mode(2);
+        assert_eq!((l.input(), l.effective_mode_name()), ("notes", "Files"));
+        assert_eq!(l.results()[0].title, "notes.md");
     }
 
     #[test]

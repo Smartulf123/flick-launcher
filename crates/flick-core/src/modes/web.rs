@@ -1,6 +1,6 @@
 //! Google and YouTube: one result that opens a search URL in the default browser.
 
-use crate::mode::{Action, ResultItem, SearchMode};
+use crate::mode::{Action, ResultItem, ResultKind, SearchMode};
 
 /// A mode that turns the query into one search URL.
 pub struct WebSearchMode {
@@ -52,6 +52,7 @@ impl SearchMode for WebSearchMode {
             subtitle: url.to_string(),
             score: 0,
             action: Action::OpenUrl(url.into()),
+            kind: ResultKind::Web,
         }]
     }
 }
@@ -59,7 +60,7 @@ impl SearchMode for WebSearchMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mode::{Action, SearchMode};
+    use crate::mode::{Action, ResultKind, SearchMode};
 
     #[test]
     fn google_url() {
@@ -94,6 +95,14 @@ mod tests {
     fn blank_query_gives_nothing() {
         assert!(WebSearchMode::google().query("", 8).is_empty());
         assert!(WebSearchMode::youtube().query("   ", 8).is_empty());
+    }
+
+    #[test]
+    fn web_results_are_web_kind() {
+        assert_eq!(
+            WebSearchMode::youtube().query("cats", 8)[0].kind,
+            ResultKind::Web
+        );
     }
 
     #[test]

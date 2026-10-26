@@ -67,6 +67,11 @@ impl ModeRegistry {
         self.entries[index].1.as_ref()
     }
 
+    /// The lowercase action keyword of the mode at `index`.
+    pub fn keyword(&self, index: usize) -> &str {
+        &self.entries[index].0
+    }
+
     pub fn index_of(&self, id: &str) -> Option<usize> {
         self.entries.iter().position(|(_, m)| m.id() == id)
     }
@@ -181,6 +186,13 @@ mod tests {
             let p = r.parse(input, 2);
             assert_eq!((p.mode, p.text, p.prefixed), (2, input, false), "{input}");
         }
+    }
+
+    #[test]
+    fn keywords_are_reported_lowercase() {
+        let mut r = ModeRegistry::new();
+        r.register("YT", Box::new(Dummy("youtube"))).unwrap();
+        assert_eq!(r.keyword(0), "yt");
     }
 
     #[test]

@@ -13,6 +13,16 @@ pub enum Action {
     None,
 }
 
+/// What a result is, so the window can pick an icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResultKind {
+    Web,
+    File,
+    Folder,
+    /// A message row, such as "Indexing files...".
+    Info,
+}
+
 /// One row in the result list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultItem {
@@ -21,6 +31,7 @@ pub struct ResultItem {
     /// Higher is better. Only compared within one mode.
     pub score: u32,
     pub action: Action,
+    pub kind: ResultKind,
 }
 
 /// A search mode such as Google, YouTube or Files.
