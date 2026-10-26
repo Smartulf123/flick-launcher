@@ -6,7 +6,7 @@ A keyboard launcher for Windows 11, written entirely in Rust. Press a hotkey and
 - **YouTube**: Enter opens YouTube search results.
 - **Files**: fuzzy search over your Desktop, Documents and Downloads as you type (`bdgt` finds `budget_2026.xlsx`). Arrow keys pick, Enter opens.
 
-Tab and Shift+Tab switch modes. You can also type a prefix: `g `, `yt ` or `f `. Esc or clicking elsewhere hides the bar. Flick lives in the tray (Reload index, Quit).
+The mode chips at the top show where you are. Tab and Shift+Tab switch modes, typing a prefix (`g `, `yt `, `f `) jumps to one, and you can click a chip or a result. The hint line at the bottom shows the keys. Esc or clicking elsewhere hides the bar. Flick lives in the tray (Reload index, Quit).
 
 ## Rust only
 

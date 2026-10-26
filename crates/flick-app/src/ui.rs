@@ -5,15 +5,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use eframe::egui::{self, Key, Modifiers, RichText, TextEdit, ViewportCommand};
 use flick_core::launcher::{Effect, Intent, Launcher};
+use flick_core::mode::ResultItem;
 use global_hotkey::GlobalHotKeyManager;
 use tray_icon::TrayIcon;
 
 use crate::actions::run_action;
+use crate::icons::Icon;
+use crate::theme;
 use crate::window::WindowHandle;
 
 pub const WIDTH: f32 = 640.0;
-const BAR_HEIGHT: f32 = 64.0;
-const ROW_HEIGHT: f32 = 40.0;
+/// Height before the first frame measures the real content.
+pub const START_HEIGHT: f32 = 120.0;
 
 /// The parts of the app that run while the bar is hidden.
 pub struct Background {
@@ -51,7 +54,7 @@ impl FlickApp {
             launcher,
             background,
             pending: Vec::new(),
-            height: BAR_HEIGHT,
+            height: START_HEIGHT,
             was_focused: false,
         }
     }
@@ -78,17 +81,35 @@ impl FlickApp {
         self.background.window.hide();
     }
 
-    fn draw(&mut self, ui: &mut egui::Ui) {
+    /// Draws chips, search box, results and the hint line. Returns the
+    /// effects of a mouse click on a result.
+    fn draw(&mut self, ui: &mut egui::Ui) -> Vec<Effect> {
+        let mut clicked_mode = None;
+        let mut clicked_row = None;
+
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.launcher.effective_mode_name()).strong());
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let active = self.launcher.effective_mode();
+            for (i, (name, keyword)) in self.launcher.modes().into_iter().enumerate() {
+                if mode_chip(ui, name, keyword, i == active).clicked() {
+                    clicked_mode = Some(i);
+                }
+            }
+        });
+        ui.add_space(10.0);
+
+        ui.horizontal(|ui| {
+            icon_slot(ui, Icon::Search, 20.0, theme::MUTED);
+            let placeholder = theme::placeholder(self.launcher.effective_mode_name());
             let mut text = self.launcher.input().to_owned();
             let response = ui.add(
                 TextEdit::singleline(&mut text)
                     .font(egui::TextStyle::Heading)
                     .frame(egui::Frame::NONE)
-                    .hint_text("Search...")
+                    .hint_text(RichText::new(placeholder).color(theme::MUTED))
                     .desired_width(f32::INFINITY),
             );
+            // This, not key consumption, is what keeps focus here after Tab.
             response.request_focus();
             if response.changed() {
                 self.launcher.set_input(&text);
@@ -96,30 +117,131 @@ impl FlickApp {
         });
 
         let selected = self.launcher.selected();
-        for (i, item) in self.launcher.results().iter().enumerate() {
-            let fill = if i == selected {
-                ui.visuals().selection.bg_fill
-            } else {
-                egui::Color32::TRANSPARENT
-            };
-            egui::Frame::NONE
-                .fill(fill)
-                .inner_margin(egui::Margin::symmetric(8, 2))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new(&item.title).strong());
-                    ui.label(RichText::new(&item.subtitle).small().weak());
-                });
+        // Moving the mouse over a row selects it; a resting pointer does not
+        // fight the arrow keys.
+        let pointer_moved = ui.input(|i| i.pointer.is_moving());
+        let mut hovered_row = None;
+        if !self.launcher.results().is_empty() {
+            ui.add_space(8.0);
         }
+        for (i, item) in self.launcher.results().iter().enumerate() {
+            let response = result_row(ui, item, i == selected);
+            if response.clicked() {
+                clicked_row = Some(i);
+            } else if pointer_moved && response.hovered() && i != selected {
+                hovered_row = Some(i);
+            }
+        }
+
+        ui.add_space(8.0);
+        let line_y = ui.cursor().top();
+        ui.painter().hline(
+            ui.max_rect().x_range(),
+            line_y,
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
+        ui.add_space(6.0);
+        let typing = !self.launcher.input().trim().is_empty();
+        ui.label(
+            RichText::new(theme::footer(self.launcher.results().len(), typing))
+                .small()
+                .color(theme::MUTED),
+        );
+
+        if let Some(i) = hovered_row {
+            self.launcher.select(i);
+        }
+        if let Some(i) = clicked_mode {
+            self.launcher.select_mode(i);
+        }
+        if let Some(i) = clicked_row {
+            self.launcher.select(i);
+            return self.launcher.handle(Intent::Enter);
+        }
+        Vec::new()
     }
 
-    fn fit_height(&mut self, ctx: &egui::Context) {
-        let height = BAR_HEIGHT + ROW_HEIGHT * self.launcher.results().len() as f32;
-        if height != self.height {
+    /// Resizes the window to the height the content actually used.
+    fn fit_height(&mut self, ctx: &egui::Context, content_height: f32) {
+        let height = content_height.ceil();
+        if (height - self.height).abs() >= 1.0 {
             self.height = height;
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WIDTH, height)));
         }
     }
+}
+
+/// Allocates a square of `size` and draws `icon` in it.
+fn icon_slot(ui: &mut egui::Ui, icon: Icon, size: f32, color: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    icon.paint(ui.painter(), rect.shrink(1.0), color);
+}
+
+/// A mode chip: icon, name and its keyword. Clickable.
+fn mode_chip(ui: &mut egui::Ui, name: &str, keyword: &str, active: bool) -> egui::Response {
+    let (fill, stroke, text) = if active {
+        (theme::SELECTED, theme::ACCENT, theme::TEXT)
+    } else {
+        (egui::Color32::TRANSPARENT, theme::BORDER, theme::MUTED)
+    };
+    egui::Frame::NONE
+        .fill(fill)
+        .stroke(egui::Stroke::new(1.0, stroke))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            ui.horizontal(|ui| {
+                icon_slot(ui, Icon::for_mode(name), 14.0, text);
+                ui.label(RichText::new(name).size(13.0).color(text));
+                ui.label(RichText::new(keyword).size(12.0).color(theme::MUTED));
+            });
+        })
+        .response
+        .interact(egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// One result: icon, title and a one-line path, cut short instead of wrapping.
+fn result_row(ui: &mut egui::Ui, item: &ResultItem, selected: bool) -> egui::Response {
+    let fill = if selected {
+        theme::SELECTED
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let icon_color = if selected {
+        theme::ACCENT
+    } else {
+        theme::MUTED
+    };
+    egui::Frame::NONE
+        .fill(fill)
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(8, 5))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                icon_slot(ui, Icon::for_kind(item.kind), 18.0, icon_color);
+                ui.add_space(4.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.add(
+                        egui::Label::new(RichText::new(&item.title).color(theme::TEXT)).truncate(),
+                    );
+                    if !item.subtitle.is_empty() {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&item.subtitle).small().color(theme::MUTED),
+                            )
+                            .truncate(),
+                        );
+                    }
+                });
+            });
+        })
+        .response
+        .interact(egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 impl eframe::App for FlickApp {
@@ -166,8 +288,20 @@ impl eframe::App for FlickApp {
                 }
             }
         }
-        egui::Frame::central_panel(ui.style()).show(ui, |ui| self.draw(ui));
-        self.fit_height(&ctx);
+        let card = egui::Frame::NONE
+            .fill(theme::BACKGROUND)
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| self.draw(ui));
+        self.fit_height(&ctx, card.response.rect.height());
+        for effect in card.inner {
+            if self.apply(effect) == Visibility::Hidden {
+                return;
+            }
+        }
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        theme::BACKGROUND.to_normalized_gamma_f32()
     }
 }
 

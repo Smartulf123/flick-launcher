@@ -2,8 +2,10 @@
 
 mod actions;
 mod hotkey;
+mod icons;
 mod paths;
 mod single_instance;
+mod theme;
 mod tray;
 mod ui;
 mod window;
@@ -115,7 +117,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flick")
-            .with_inner_size([ui::WIDTH, 64.0])
+            .with_inner_size([ui::WIDTH, ui::START_HEIGHT])
             .with_decorations(false)
             .with_always_on_top()
             .with_taskbar(false)
@@ -130,7 +132,9 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
+            theme::apply(&ctx);
             let window = window::WindowHandle::from_creation_context(cc)?;
+            window.round_corners();
             let shown = Arc::new(AtomicBool::new(false));
             let hotkey = hotkey::register(&config.hotkey, window, shown.clone(), ctx.clone());
             let hotkey_error = hotkey.as_ref().err().map(|e| format!("{e:#}"));
