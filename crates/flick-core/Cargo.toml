@@ -1,0 +1,10 @@
+[package]
+name = "flick-core"
+description = "Search modes, query parsing, file index and launcher state for Flick"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = "2"
