@@ -1,0 +1,9 @@
+---
+source: crates/flick-core/src/modes/files.rs
+expression: "r.iter().map(|i| &i.title).collect::<Vec<_>>()"
+---
+[
+    "Rust",
+    "rust_book.pdf",
+    "trust.txt",
+]
