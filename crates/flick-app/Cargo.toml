@@ -1,0 +1,17 @@
+[package]
+name = "flick-app"
+description = "Flick: a keyboard launcher for Windows 11"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "flick"
+path = "src/main.rs"
+
+[dependencies]
+flick-core = { path = "../flick-core" }
+anyhow = "1"
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
+open = "5"
