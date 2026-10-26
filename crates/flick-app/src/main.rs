@@ -1,7 +1,9 @@
 #![windows_subsystem = "windows"]
 
 mod actions;
+mod hotkey;
 mod ui;
+mod window;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,7 +51,8 @@ fn main() -> eframe::Result {
             .with_decorations(false)
             .with_always_on_top()
             .with_taskbar(false)
-            .with_resizable(false),
+            .with_resizable(false)
+            .with_visible(false),
         centered: true,
         ..Default::default()
     };
@@ -58,6 +61,11 @@ fn main() -> eframe::Result {
         "Flick",
         options,
         Box::new(move |cc| {
+            let window = window::WindowHandle::from_creation_context(cc)?;
+            let hotkey = hotkey::register(&config.hotkey, window, cc.egui_ctx.clone())
+                .inspect_err(|e| eprintln!("{e:#}"))
+                .ok();
+
             let index_updated = Arc::new(AtomicBool::new(false));
             let flag = index_updated.clone();
             let ctx = cc.egui_ctx.clone();
@@ -65,7 +73,12 @@ fn main() -> eframe::Result {
                 flag.store(true, Ordering::Relaxed);
                 ctx.request_repaint();
             });
-            Ok(Box::new(ui::FlickApp::new(launcher, index_updated)))
+            Ok(Box::new(ui::FlickApp::new(
+                launcher,
+                index_updated,
+                window,
+                hotkey,
+            )))
         }),
     )
 }

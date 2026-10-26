@@ -5,8 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use eframe::egui::{self, Key, Modifiers, RichText, TextEdit, ViewportCommand};
 use flick_core::launcher::{Effect, Intent, Launcher};
+use global_hotkey::GlobalHotKeyManager;
 
 use crate::actions::run_action;
+use crate::window::WindowHandle;
 
 pub const WIDTH: f32 = 640.0;
 const BAR_HEIGHT: f32 = 64.0;
@@ -16,27 +18,45 @@ pub struct FlickApp {
     launcher: Launcher,
     /// Set by the indexing thread when a new file index is ready.
     index_updated: Arc<AtomicBool>,
+    window: WindowHandle,
+    /// Keeps the hotkey registered; `None` if registration failed.
+    _hotkey: Option<GlobalHotKeyManager>,
     height: f32,
+    was_focused: bool,
 }
 
 impl FlickApp {
-    pub fn new(launcher: Launcher, index_updated: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        launcher: Launcher,
+        index_updated: Arc<AtomicBool>,
+        window: WindowHandle,
+        hotkey: Option<GlobalHotKeyManager>,
+    ) -> Self {
         Self {
             launcher,
             index_updated,
+            window,
+            _hotkey: hotkey,
             height: BAR_HEIGHT,
+            was_focused: false,
         }
     }
 
-    fn apply(&mut self, ctx: &egui::Context, effect: Effect) {
+    fn apply(&mut self, effect: Effect) {
         match effect {
             Effect::Run(action) => {
                 if let Err(e) = run_action(&action) {
                     eprintln!("could not open {action:?}: {e}");
                 }
             }
-            Effect::Hide => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Effect::Hide => self.hide(),
         }
+    }
+
+    fn hide(&mut self) {
+        self.launcher.reset();
+        self.was_focused = false;
+        self.window.hide();
     }
 
     fn draw(&mut self, ui: &mut egui::Ui) {
@@ -84,14 +104,24 @@ impl FlickApp {
 }
 
 impl eframe::App for FlickApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
+    /// Runs even while hidden: picks up a finished index and hides the bar
+    /// when the user clicks into another window.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.index_updated.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();
         }
+        let focused = ctx.input(|i| i.viewport().focused) == Some(true);
+        if self.was_focused && !focused {
+            self.hide();
+        }
+        self.was_focused = focused;
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         for intent in read_intents(&ctx) {
             for effect in self.launcher.handle(intent) {
-                self.apply(&ctx, effect);
+                self.apply(effect);
             }
         }
         egui::Frame::central_panel(ui.style()).show(ui, |ui| self.draw(ui));
