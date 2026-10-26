@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use eframe::egui::{self, Key, Modifiers, RichText, TextEdit, ViewportCommand};
 use flick_core::launcher::{Effect, Intent, Launcher};
 use global_hotkey::GlobalHotKeyManager;
+use tray_icon::TrayIcon;
 
 use crate::actions::run_action;
 use crate::window::WindowHandle;
@@ -14,29 +15,31 @@ pub const WIDTH: f32 = 640.0;
 const BAR_HEIGHT: f32 = 64.0;
 const ROW_HEIGHT: f32 = 40.0;
 
+/// The parts of the app that run while the bar is hidden.
+pub struct Background {
+    /// Set by the indexing thread when a new file index is ready.
+    pub index_updated: Arc<AtomicBool>,
+    /// Set by the tray's Quit item.
+    pub quit: Arc<AtomicBool>,
+    pub window: WindowHandle,
+    /// Keeps the hotkey registered; `None` if registration failed.
+    pub hotkey: Option<GlobalHotKeyManager>,
+    /// Keeps the tray icon alive; `None` if it could not be created.
+    pub tray: Option<TrayIcon>,
+}
+
 pub struct FlickApp {
     launcher: Launcher,
-    /// Set by the indexing thread when a new file index is ready.
-    index_updated: Arc<AtomicBool>,
-    window: WindowHandle,
-    /// Keeps the hotkey registered; `None` if registration failed.
-    _hotkey: Option<GlobalHotKeyManager>,
+    background: Background,
     height: f32,
     was_focused: bool,
 }
 
 impl FlickApp {
-    pub fn new(
-        launcher: Launcher,
-        index_updated: Arc<AtomicBool>,
-        window: WindowHandle,
-        hotkey: Option<GlobalHotKeyManager>,
-    ) -> Self {
+    pub fn new(launcher: Launcher, background: Background) -> Self {
         Self {
             launcher,
-            index_updated,
-            window,
-            _hotkey: hotkey,
+            background,
             height: BAR_HEIGHT,
             was_focused: false,
         }
@@ -46,7 +49,7 @@ impl FlickApp {
         match effect {
             Effect::Run(action) => {
                 if let Err(e) = run_action(&action) {
-                    eprintln!("could not open {action:?}: {e}");
+                    log::error!("could not open {action:?}: {e}");
                 }
             }
             Effect::Hide => self.hide(),
@@ -56,7 +59,7 @@ impl FlickApp {
     fn hide(&mut self) {
         self.launcher.reset();
         self.was_focused = false;
-        self.window.hide();
+        self.background.window.hide();
     }
 
     fn draw(&mut self, ui: &mut egui::Ui) {
@@ -107,7 +110,14 @@ impl eframe::App for FlickApp {
     /// Runs even while hidden: picks up a finished index and hides the bar
     /// when the user clicks into another window.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.index_updated.swap(false, Ordering::Relaxed) {
+        if self.background.quit.load(Ordering::Relaxed) {
+            log::info!("quit from tray");
+            // Remove the tray icon now so Windows does not leave a ghost icon.
+            self.background.tray = None;
+            self.background.hotkey = None;
+            std::process::exit(0);
+        }
+        if self.background.index_updated.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();
         }
         let focused = ctx.input(|i| i.viewport().focused) == Some(true);
