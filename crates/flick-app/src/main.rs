@@ -99,7 +99,21 @@ fn main() -> eframe::Result {
         platform::instance::send(Message::Toggle);
         return Ok(());
     }
-    let Some(_instance) = platform::instance::acquire(|_| {}) else {
+    // The window's context is filled in once it exists, so background
+    // threads (and the instance socket) can wake it.
+    let wake: Arc<OnceLock<egui::Context>> = Arc::default();
+    // What a second `flick` asked for, handled by the bar on its thread.
+    let messages: ui::MessageQueue = Arc::default();
+    let on_message = {
+        let (messages, wake) = (messages.clone(), wake.clone());
+        move |msg| {
+            messages.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
+            if let Some(ctx) = wake.get() {
+                ctx.request_repaint();
+            }
+        }
+    };
+    let Some(_instance) = platform::instance::acquire(on_message) else {
         platform::instance::send(Message::Show);
         return Ok(());
     };
@@ -113,11 +127,8 @@ fn main() -> eframe::Result {
     }
     platform::autostart::sync(first_run);
 
-    // "Results may have changed" (index rebuilt, suggestions arrived). The
-    // window's context is filled in once it exists, so background threads
-    // can wake it.
+    // "Results may have changed" (index rebuilt, suggestions arrived).
     let results_changed = Arc::new(AtomicBool::new(false));
-    let wake: Arc<OnceLock<egui::Context>> = Arc::default();
     let notify = {
         let (flag, wake) = (results_changed.clone(), wake.clone());
         move || {
@@ -223,6 +234,7 @@ fn main() -> eframe::Result {
             let services = ui::Services {
                 results_changed,
                 shown,
+                messages,
                 window,
                 hotkey: hotkeys.ok(),
                 tray,

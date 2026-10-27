@@ -21,6 +21,7 @@ use crate::hotkey::Hotkeys;
 use crate::hotkey_picker::{Capture, Step};
 use crate::hotkey_text::{Os, display};
 use crate::icons::Icon;
+use crate::platform::message::Message;
 use crate::platform::{self, BarWindow, IconCache, autostart, paths};
 use crate::theme::{self, KANAGAWA, Palette};
 use crate::tray::{self, BackgroundChoice, Tray, TrayCommand};
@@ -43,12 +44,17 @@ const GALLERY_HEIGHT: f32 = 640.0;
 /// Tray clicks waiting for the event-loop thread.
 pub type TrayQueue = Arc<Mutex<Vec<TrayCommand>>>;
 
+/// Messages from a second `flick` (such as `flick --toggle`), waiting for
+/// the event-loop thread.
+pub type MessageQueue = Arc<Mutex<Vec<Message>>>;
+
 /// The parts of the app that keep running while the bar is hidden.
 pub struct Services {
     /// Set when results may have changed: a new file index, or suggestions arrived.
     pub results_changed: Arc<AtomicBool>,
     /// Set by the hotkey handler each time it shows the bar.
     pub shown: Arc<AtomicBool>,
+    pub messages: MessageQueue,
     pub window: BarWindow,
     /// The system-wide hotkey; `None` if the hotkey manager would not start.
     pub hotkey: Option<Hotkeys>,
@@ -96,6 +102,8 @@ pub struct FlickApp {
     bar_position: Option<egui::Pos2>,
     /// The "Change hotkey" view, while it is open.
     capture: Option<Capture>,
+    /// Whether the bar is on screen, for `flick --toggle`.
+    visible: bool,
     /// The gear menu drawn inside the bar (where there is no system pop-up).
     menu_open: bool,
     /// A row of that menu was clicked this frame.
@@ -138,6 +146,7 @@ impl FlickApp {
             picks: Picks::default(),
             bar_position: None,
             capture: None,
+            visible: false,
             menu_open: false,
             menu_choice: None,
         }
@@ -164,6 +173,7 @@ impl FlickApp {
         self.was_focused = false;
         self.close_capture();
         self.menu_open = false;
+        self.visible = false;
         self.services.window.hide();
     }
 
@@ -176,6 +186,7 @@ impl FlickApp {
             hotkeys.pause();
         }
         self.capture = Some(Capture::default());
+        self.visible = true;
         self.services.window.show_and_focus();
     }
 
@@ -311,6 +322,7 @@ impl FlickApp {
             let at = placement::place_in(work.shrink(16.0), size, centered);
             ctx.send_viewport_cmd(ViewportCommand::OuterPosition(at));
         }
+        self.visible = true;
         self.services.window.show_and_focus();
     }
 
@@ -865,7 +877,25 @@ impl eframe::App for FlickApp {
             ctx.send_viewport_cmd(ViewportCommand::OuterPosition(at));
             self.positioned = true;
         }
+        let messages = std::mem::take(
+            &mut *self
+                .services
+                .messages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+        for message in messages {
+            match message {
+                Message::Toggle if self.visible => self.hide(),
+                // Shown like the hotkey shows it, reset below.
+                Message::Toggle | Message::Show => {
+                    self.services.shown.store(true, Ordering::Relaxed);
+                    self.services.window.show_and_focus();
+                }
+            }
+        }
         if self.services.shown.swap(false, Ordering::Relaxed) {
+            self.visible = true;
             // The hotkey always brings back the search bar.
             self.close_gallery(ctx);
             // Every show starts empty, whatever happened before the last hide.
