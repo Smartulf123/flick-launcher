@@ -31,25 +31,12 @@ impl SuggestionSource for Fetcher {
 /// Starts the real fetcher: HTTPS through Windows' own TLS (no C code in
 /// the build). `on_update` runs after new suggestions land in `cache`.
 pub fn start(cache: SuggestionCache, on_update: impl Fn() + Send + 'static) -> Arc<Fetcher> {
-    let tls = ureq::tls::TlsConfig::builder()
-        .provider(ureq::tls::TlsProvider::NativeTls)
-        // Windows' own certificate store, like a browser.
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .build();
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .tls_config(tls)
-        .timeout_global(Some(TIMEOUT))
-        .build()
-        .into();
+    let agent = crate::http::agent(TIMEOUT);
     start_with(
         cache,
         move |engine, query| {
-            let body = agent
-                .get(&suggest_url(engine, query))
-                .call()?
-                .body_mut()
-                .read_to_string()?;
-            Ok(parse_suggestions(&body))
+            let body = crate::http::get_bytes(&agent, &suggest_url(engine, query))?;
+            Ok(parse_suggestions(&String::from_utf8_lossy(&body)))
         },
         on_update,
     )
