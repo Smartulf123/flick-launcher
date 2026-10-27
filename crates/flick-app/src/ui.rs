@@ -254,52 +254,45 @@ impl FlickApp {
             });
         });
 
-        ui.add_space(GAP as f32 * 0.8);
+        // No results, no second card: the bar is just the search card.
+        let has_results = !self.launcher.results().is_empty();
+        if has_results {
+            ui.add_space(GAP as f32 * 0.8);
+        }
 
-        card.show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let selected = self.launcher.selected();
-            // Moving the mouse over a row selects it; a resting pointer does
-            // not fight the arrow keys.
-            let pointer_moved = ui.input(|i| i.pointer.is_moving());
-            // The list scrolls instead of pushing the window off the screen.
-            let max_height = ui.input(|i| {
-                let monitor = i.viewport().monitor_size.map_or(f32::INFINITY, |m| m.y);
-                let top = i.viewport().outer_rect.map_or(0.0, |r| r.top());
-                placement::list_max_height(monitor, top)
-            });
-            let scroll_to_selected = self.shown_selection != Some(selected);
-            self.shown_selection = Some(selected);
-            egui::ScrollArea::vertical()
-                .max_height(max_height)
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    for (i, item) in self.launcher.results().iter().enumerate() {
-                        let response = result_row(ui, p, &mut self.icons, item, i == selected);
-                        if i == selected && scroll_to_selected {
-                            response.scroll_to_me(None);
-                        }
-                        if response.clicked() {
-                            clicked_row = Some(i);
-                        } else if pointer_moved && response.hovered() && i != selected {
-                            hovered_row = Some(i);
-                        }
-                    }
+        if has_results {
+            card.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let selected = self.launcher.selected();
+                // Moving the mouse over a row selects it; a resting pointer does
+                // not fight the arrow keys.
+                let pointer_moved = ui.input(|i| i.pointer.is_moving());
+                // The list scrolls instead of pushing the window off the screen.
+                let max_height = ui.input(|i| {
+                    let monitor = i.viewport().monitor_size.map_or(f32::INFINITY, |m| m.y);
+                    let top = i.viewport().outer_rect.map_or(0.0, |r| r.top());
+                    placement::list_max_height(monitor, top)
                 });
-            if !self.launcher.results().is_empty() {
-                ui.add_space(4.0);
-                let y = ui.cursor().top();
-                ui.painter()
-                    .hline(ui.max_rect().x_range(), y, egui::Stroke::new(1.0, p.border));
-                ui.add_space(6.0);
-            }
-            let typing = !self.launcher.input().trim().is_empty();
-            ui.label(
-                RichText::new(theme::footer(self.launcher.results().len(), typing))
-                    .small()
-                    .color(p.muted),
-            );
-        });
+                let scroll_to_selected = self.shown_selection != Some(selected);
+                self.shown_selection = Some(selected);
+                egui::ScrollArea::vertical()
+                    .max_height(max_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for (i, item) in self.launcher.results().iter().enumerate() {
+                            let response = result_row(ui, p, &mut self.icons, item, i == selected);
+                            if i == selected && scroll_to_selected {
+                                response.scroll_to_me(None);
+                            }
+                            if response.clicked() {
+                                clicked_row = Some(i);
+                            } else if pointer_moved && response.hovered() && i != selected {
+                                hovered_row = Some(i);
+                            }
+                        }
+                    });
+            });
+        }
 
         if let Some(i) = hovered_row {
             self.launcher.select(i);

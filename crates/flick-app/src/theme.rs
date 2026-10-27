@@ -137,19 +137,6 @@ pub fn placeholder(mode_name: &str) -> String {
     }
 }
 
-/// The hint line under the results.
-pub fn footer(result_count: usize, typing: bool) -> String {
-    const GAP: &str = "    ";
-    match (typing, result_count) {
-        (false, _) => format!("Tab switch mode{GAP}Esc hide"),
-        (true, 0) => format!("No results{GAP}Tab switch mode{GAP}Esc hide"),
-        (true, n) => {
-            let noun = if n == 1 { "result" } else { "results" };
-            format!("{n} {noun}{GAP}Up/Down choose{GAP}Enter open{GAP}Esc hide")
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,23 +178,5 @@ mod tests {
         assert_eq!(placeholder("Google"), "Search Google");
         assert_eq!(placeholder("YouTube"), "Search YouTube");
         assert_eq!(placeholder("Files"), "Search files and folders");
-    }
-
-    #[test]
-    fn footer_teaches_keys_before_typing() {
-        assert_eq!(footer(0, false), "Tab switch mode    Esc hide");
-    }
-
-    #[test]
-    fn footer_counts_results_while_typing() {
-        assert_eq!(
-            footer(3, true),
-            "3 results    Up/Down choose    Enter open    Esc hide"
-        );
-        assert_eq!(
-            footer(1, true),
-            "1 result    Up/Down choose    Enter open    Esc hide"
-        );
-        assert_eq!(footer(0, true), "No results    Tab switch mode    Esc hide");
     }
 }
