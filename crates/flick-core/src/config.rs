@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::index::SharedIndex;
+use crate::modes::suggest::Suggestions;
 use crate::modes::{FilesMode, WebSearchMode};
 use crate::registry::{ModeRegistry, RegistryError};
 
@@ -17,6 +18,9 @@ pub struct Config {
     /// Mode shown when the bar opens: `"google"`, `"youtube"` or `"files"`.
     pub default_mode: String,
     pub max_results: usize,
+    /// Show Google and YouTube suggestions while typing. Sends what you
+    /// type to Google, as a browser search box does.
+    pub suggestions: bool,
     pub keywords: Keywords,
     pub files: FilesConfig,
     pub appearance: Appearance,
@@ -101,6 +105,7 @@ impl Default for Config {
             hotkey: "Alt+Space".into(),
             default_mode: "google".into(),
             max_results: 8,
+            suggestions: true,
             keywords: Keywords::default(),
             files: FilesConfig::default(),
             appearance: Appearance::default(),
@@ -171,9 +176,30 @@ pub fn build_registry(
     config: &Config,
     index: SharedIndex,
 ) -> Result<(ModeRegistry, usize), RegistryError> {
+    build_registry_with(config, index, None)
+}
+
+/// Like `build_registry`, giving the web modes suggestions when
+/// `config.suggestions` is on and a source is given.
+pub fn build_registry_with(
+    config: &Config,
+    index: SharedIndex,
+    suggestions: Option<Suggestions>,
+) -> Result<(ModeRegistry, usize), RegistryError> {
+    let suggestions = suggestions.filter(|_| config.suggestions);
+    let web = |mode: WebSearchMode| match &suggestions {
+        Some(s) => mode.with_suggestions(s.clone()),
+        None => mode,
+    };
     let mut registry = ModeRegistry::new();
-    registry.register(&config.keywords.google, Box::new(WebSearchMode::google()))?;
-    registry.register(&config.keywords.youtube, Box::new(WebSearchMode::youtube()))?;
+    registry.register(
+        &config.keywords.google,
+        Box::new(web(WebSearchMode::google())),
+    )?;
+    registry.register(
+        &config.keywords.youtube,
+        Box::new(web(WebSearchMode::youtube())),
+    )?;
     registry.register(&config.keywords.files, Box::new(FilesMode::new(index)))?;
     let default = registry.index_of(&config.default_mode).unwrap_or(0);
     Ok((registry, default))
@@ -192,6 +218,59 @@ mod tests {
         assert!(err.is_none());
         assert_eq!(c, Config::default());
         assert!(path.exists());
+    }
+
+    use crate::modes::suggest::{Engine, SuggestionCache, SuggestionSource, Suggestions};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<Engine>>);
+    impl SuggestionSource for Recorder {
+        fn request(&self, engine: Engine, _query: &str) {
+            self.0.lock().unwrap().push(engine);
+        }
+    }
+
+    fn suggestions(recorder: &Arc<Recorder>) -> Suggestions {
+        Suggestions {
+            cache: SuggestionCache::default(),
+            source: recorder.clone(),
+        }
+    }
+
+    #[test]
+    fn suggestions_are_on_by_default() {
+        assert!(Config::default().suggestions);
+    }
+
+    #[test]
+    fn web_modes_get_suggestions_when_on() {
+        let recorder = Arc::new(Recorder::default());
+        let (r, _) = build_registry_with(
+            &Config::default(),
+            Default::default(),
+            Some(suggestions(&recorder)),
+        )
+        .unwrap();
+        r.mode(0).query("rust", 8);
+        r.mode(1).query("lofi", 8);
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            [Engine::Google, Engine::YouTube]
+        );
+    }
+
+    #[test]
+    fn suggestions_off_in_config_means_no_requests() {
+        let recorder = Arc::new(Recorder::default());
+        let config = Config {
+            suggestions: false,
+            ..Config::default()
+        };
+        let (r, _) =
+            build_registry_with(&config, Default::default(), Some(suggestions(&recorder))).unwrap();
+        r.mode(0).query("rust", 8);
+        assert!(recorder.0.lock().unwrap().is_empty());
     }
 
     #[test]
