@@ -10,6 +10,8 @@ use crate::hotkey_text::{Os, combo_text, hint};
 pub struct Capture {
     pub candidate: Option<String>,
     pub message: Option<&'static str>,
+    /// Why the last confirmed pick was refused (e.g. already in use).
+    pub error: Option<String>,
 }
 
 /// What a key press means for the view.
@@ -36,6 +38,7 @@ impl Capture {
                     Ok(text) => {
                         self.candidate = Some(text);
                         self.message = None;
+                        self.error = None;
                     }
                     Err(err) => self.message = Some(hint(err, os)),
                 }

@@ -12,15 +12,17 @@ use eframe::egui::{
 use flick_core::config::{self, BackgroundSource, Config};
 use flick_core::launcher::{Effect, Intent, Launcher};
 use flick_core::mode::{Action, ResultItem, ResultKind};
-use global_hotkey::GlobalHotKeyManager;
 
 use crate::actions::run_action;
 use crate::gallery::{Gallery, GalleryAction, Pick, Picks};
 use crate::gallery_loader::{Done, Job, Loader};
+use crate::hotkey::Hotkeys;
+use crate::hotkey_picker::{Capture, Step};
+use crate::hotkey_text::{Os, display};
 use crate::icons::Icon;
 use crate::shell_icons::IconCache;
 use crate::theme::{self, KANAGAWA, Palette};
-use crate::tray::{BackgroundChoice, Tray, TrayCommand};
+use crate::tray::{self, BackgroundChoice, Tray, TrayCommand};
 use crate::wallhaven::{self, Wallpaper};
 use crate::window::WindowHandle;
 use crate::{autostart, background, paths, placement};
@@ -28,10 +30,10 @@ use crate::{autostart, background, paths, placement};
 pub const WIDTH: f32 = 640.0;
 /// Height before the first frame measures the real content.
 pub const START_HEIGHT: f32 = 120.0;
-/// Space around and between the cards, where the picture shows.
 /// About the bar's height with a full list of results. The background is
 /// fitted to this height once, so it stays put while results come and go.
 const FULL_HEIGHT: f32 = 520.0;
+/// Space around and between the cards, where the picture shows.
 const GAP: i8 = 10;
 const ICON_SIZE: f32 = 20.0;
 /// The window's size while the background gallery is open.
@@ -48,8 +50,8 @@ pub struct Services {
     /// Set by the hotkey handler each time it shows the bar.
     pub shown: Arc<AtomicBool>,
     pub window: WindowHandle,
-    /// Keeps the hotkey registered; `None` if registration failed.
-    pub hotkey: Option<GlobalHotKeyManager>,
+    /// The system-wide hotkey; `None` if the hotkey manager would not start.
+    pub hotkey: Option<Hotkeys>,
     /// Keeps the tray icon alive; `None` if it could not be created.
     pub tray: Option<Tray>,
     pub tray_queue: TrayQueue,
@@ -92,6 +94,8 @@ pub struct FlickApp {
     picks: Picks,
     /// Where the bar was when the gallery opened, to go back there.
     bar_position: Option<egui::Pos2>,
+    /// The "Change hotkey" view, while it is open.
+    capture: Option<Capture>,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -129,6 +133,7 @@ impl FlickApp {
             gallery: None,
             picks: Picks::default(),
             bar_position: None,
+            capture: None,
         }
     }
 
@@ -151,7 +156,54 @@ impl FlickApp {
         self.launcher.reset();
         self.pending.clear();
         self.was_focused = false;
+        self.close_capture();
         self.services.window.hide();
+    }
+
+    /// Opens the "Change hotkey" view, with the hotkey paused meanwhile.
+    fn open_capture(&mut self, ctx: &egui::Context) {
+        self.close_gallery(ctx);
+        self.launcher.reset();
+        self.pending.clear();
+        if let Some(hotkeys) = &self.services.hotkey {
+            hotkeys.pause();
+        }
+        self.capture = Some(Capture::default());
+        self.services.window.show_and_focus();
+    }
+
+    /// Leaves the "Change hotkey" view; the hotkey in use works again.
+    fn close_capture(&mut self) {
+        if self.capture.take().is_some()
+            && let Some(hotkeys) = &self.services.hotkey
+        {
+            hotkeys.resume();
+        }
+    }
+
+    /// Switches to the picked hotkey and saves it, or explains why not.
+    fn confirm_hotkey(&mut self, text: String) {
+        let result = match &mut self.services.hotkey {
+            Some(hotkeys) => hotkeys.change(&text),
+            None => Err(anyhow::anyhow!("the hotkey manager is not running")),
+        };
+        match result {
+            Ok(()) => {
+                log::info!("hotkey: {text}");
+                self.settings.config.hotkey = text.clone();
+                self.save_settings();
+                if let Some(tray) = &self.services.tray {
+                    tray.set_tooltip(&tray::tooltip(&text, None));
+                }
+                self.close_capture();
+            }
+            Err(e) => {
+                log::warn!("hotkey {text}: {e:#}");
+                if let Some(capture) = &mut self.capture {
+                    capture.error = Some(format!("{e:#}"));
+                }
+            }
+        }
     }
 
     fn save_settings(&self) {
@@ -164,6 +216,7 @@ impl FlickApp {
         match command {
             TrayCommand::ToggleStartWithWindows => autostart::toggle(),
             TrayCommand::Background(choice) => self.set_background(ctx, choice),
+            TrayCommand::ChangeHotkey => self.open_capture(ctx),
             TrayCommand::ReloadIndex => (self.services.reindex)(),
             TrayCommand::Quit => {
                 log::info!("quit from tray");
@@ -449,19 +502,83 @@ impl FlickApp {
         }
     }
 
-    /// Draws the two cards. Returns the effects of a mouse click on a result.
-    fn draw(&mut self, ui: &mut egui::Ui) -> Vec<Effect> {
+    /// A floating card: see-through over a picture, solid without one.
+    fn card(&self) -> egui::Frame {
         let p = self.palette;
         let fill = if self.picture.is_some() {
             theme::card_fill(p, self.settings.config.appearance.clamped_tint())
         } else {
             p.background
         };
-        let card = egui::Frame::NONE
+        egui::Frame::NONE
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, p.border))
             .corner_radius(14)
-            .inner_margin(egui::Margin::symmetric(14, 10));
+            .inner_margin(egui::Margin::symmetric(14, 10))
+    }
+
+    /// The "Change hotkey" view: takes every key press, shows the pick.
+    fn capture_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let presses = take_key_presses(ctx);
+        for (key, modifiers) in presses {
+            let Some(capture) = &mut self.capture else {
+                break;
+            };
+            match capture.key(key, modifiers, Os::CURRENT) {
+                Step::Stay => {}
+                Step::Cancel => self.close_capture(),
+                Step::Confirm(text) => self.confirm_hotkey(text),
+            }
+        }
+        let window = ui.max_rect();
+        self.paint_background(ui, window);
+        let Some(capture) = &self.capture else {
+            return;
+        };
+        let p = self.palette;
+        let current = self
+            .services
+            .hotkey
+            .as_ref()
+            .and_then(Hotkeys::current)
+            .map_or_else(|| "none".to_owned(), |text| display(text, Os::CURRENT));
+        let card = self.card();
+        let content = egui::Frame::NONE
+            .inner_margin(egui::Margin::same(GAP))
+            .show(ui, |ui| {
+                card.show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        RichText::new("Press the keys you want to use")
+                            .heading()
+                            .color(p.text),
+                    );
+                    ui.label(RichText::new(format!("Now: {current}")).color(p.muted));
+                    ui.add_space(10.0);
+                    let picked = capture
+                        .candidate
+                        .as_deref()
+                        .map(|text| display(text, Os::CURRENT));
+                    let shown = picked.unwrap_or_else(|| "...".to_owned());
+                    ui.label(RichText::new(shown).size(26.0).color(p.text));
+                    if let Some(note) = capture.error.as_deref().or(capture.message) {
+                        ui.label(RichText::new(note).color(p.muted));
+                    }
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new("Enter to keep \u{b7} Esc to cancel")
+                            .small()
+                            .color(p.muted),
+                    );
+                });
+            });
+        self.fit_height(ctx, content.response.rect.height());
+    }
+
+    /// Draws the two cards. Returns the effects of a mouse click on a result.
+    fn draw(&mut self, ui: &mut egui::Ui) -> Vec<Effect> {
+        let p = self.palette;
+        let card = self.card();
 
         let mut clicked_mode = None;
         let mut clicked_row = None;
@@ -753,6 +870,10 @@ impl eframe::App for FlickApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.capture.is_some() {
+            self.capture_ui(ui, &ctx);
+            return;
+        }
         if self.gallery.is_some() {
             self.gallery_ui(ui, &ctx);
             return;
@@ -810,6 +931,28 @@ impl eframe::App for FlickApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         self.palette.background.to_normalized_gamma_f32()
     }
+}
+
+/// Every key pressed this frame, with its modifiers; typed text is dropped
+/// too, so nothing reaches the search box underneath.
+fn take_key_presses(ctx: &egui::Context) -> Vec<(Key, Modifiers)> {
+    ctx.input_mut(|input| {
+        let mut presses = Vec::new();
+        input.events.retain(|event| match event {
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } => {
+                presses.push((*key, *modifiers));
+                false
+            }
+            egui::Event::Text(_) | egui::Event::Key { .. } => false,
+            _ => true,
+        });
+        presses
+    })
 }
 
 /// The launcher's keys pressed in one frame, in press order.

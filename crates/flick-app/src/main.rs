@@ -172,8 +172,13 @@ fn main() -> eframe::Result {
             let window = window::WindowHandle::from_creation_context(cc)?;
             window.round_corners();
             let shown = Arc::new(AtomicBool::new(false));
-            let hotkey = hotkey::register(&config.hotkey, window, shown.clone(), ctx.clone());
-            let hotkey_error = hotkey.as_ref().err().map(|e| format!("{e:#}"));
+            let mut hotkeys =
+                hotkey::Hotkeys::new(hotkey::on_press(window, shown.clone(), ctx.clone()));
+            let hotkey_error = match &mut hotkeys {
+                Ok(hotkeys) => hotkeys.change(&config.hotkey).err(),
+                Err(e) => Some(anyhow::anyhow!("{e:#}")),
+            }
+            .map(|e| format!("{e:#}"));
             if let Some(e) = &hotkey_error {
                 log::error!("hotkey {:?}: {e}", config.hotkey);
             }
@@ -212,7 +217,7 @@ fn main() -> eframe::Result {
                 results_changed,
                 shown,
                 window,
-                hotkey: hotkey.ok(),
+                hotkey: hotkeys.ok(),
                 tray,
                 tray_queue,
                 reindex: Box::new(move || {

@@ -1,5 +1,5 @@
 //! The tray icon: shows the hotkey, and offers Start with Windows,
-//! Background, Reload index and Quit.
+//! Background, Change hotkey, Reload index and Quit.
 
 use anyhow::Context as _;
 use flick_core::config::BackgroundSource;
@@ -25,6 +25,8 @@ pub enum TrayCommand {
     /// The checkbox was clicked; Windows has already flipped its tick.
     ToggleStartWithWindows,
     Background(BackgroundChoice),
+    /// Opens the "Change hotkey" view in the bar.
+    ChangeHotkey,
     ReloadIndex,
     Quit,
 }
@@ -55,7 +57,7 @@ pub fn circle_rgba(size: u32) -> Vec<u8> {
 /// The tray icon and the menu items whose ticks the app updates.
 /// Menu items are not thread-safe: keep this on the event-loop thread.
 pub struct Tray {
-    _icon: TrayIcon,
+    icon: TrayIcon,
     no_background: CheckMenuItem,
     /// The background choices, shown by the gear or a right-click on the bar.
     bar_menu: Menu,
@@ -68,6 +70,13 @@ impl Tray {
         // SAFETY: `hwnd` is the bar's own live window, owned by this thread.
         unsafe {
             self.bar_menu.show_context_menu_for_hwnd(hwnd, None);
+        }
+    }
+
+    /// Updates the hover text, e.g. after the hotkey changed.
+    pub fn set_tooltip(&self, text: &str) {
+        if let Err(e) = self.icon.set_tooltip(Some(text)) {
+            log::error!("could not update the tray tooltip: {e}");
         }
     }
 
@@ -106,10 +115,15 @@ pub fn build(
     background_menu.append(&choose)?;
     background_menu.append(&no_background)?;
 
+    let change_hotkey = MenuItem::new("Change hotkey...", true, None);
+    commands.push((change_hotkey.id().clone(), TrayCommand::ChangeHotkey));
+
     let bar_menu = Menu::new();
     bar_menu.append(&browse)?;
     bar_menu.append(&choose)?;
     bar_menu.append(&no_background)?;
+    bar_menu.append(&PredefinedMenuItem::separator())?;
+    bar_menu.append(&change_hotkey)?;
 
     let reload = MenuItem::new("Reload index", true, None);
     let quit = MenuItem::new("Quit", true, None);
@@ -119,6 +133,7 @@ pub fn build(
     let menu = Menu::new();
     menu.append(&autostart)?;
     menu.append(&background_menu)?;
+    menu.append(&change_hotkey)?;
     menu.append(&reload)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&quit)?;
@@ -138,7 +153,7 @@ pub fn build(
         .context("could not create the tray icon")?;
 
     let tray = Tray {
-        _icon: icon,
+        icon,
         no_background,
         bar_menu,
     };

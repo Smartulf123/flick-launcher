@@ -32,8 +32,9 @@ To remove Flick: right-click its tray icon, untick **Start with Windows**, choos
 | **↑** / **↓** | Pick a result |
 | **Esc**, or click elsewhere | Hide the bar |
 | Drag the edges of the bar | Move it |
+| Gear → **Change hotkey...** | Pick your own hotkey: press the keys, then Enter |
 
-You can also click a mode chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows**, **Background**, **Reload index** (scans your folders again right away) and **Quit**.
+You can also click a mode chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows**, **Background**, **Change hotkey...**, **Reload index** (scans your folders again right away) and **Quit**.
 
 ### Your files
 
@@ -56,7 +57,7 @@ Flick creates `%APPDATA%\flick\config.toml` the first time it runs. Open it in a
 
 | Setting | Default | What it does |
 |---|---|---|
-| `hotkey` | `"Alt+Space"` | The key that shows the bar. Modifiers: `Alt`, `Ctrl`, `Shift`, `Super` (the Windows key), e.g. `"Ctrl+Space"`. |
+| `hotkey` | `"Alt+Space"` | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt`, `Ctrl`, `Shift`, `Super` (the Windows key), e.g. `"Ctrl+Space"`. |
 | `default_mode` | `"google"` | Mode the bar opens in: `google`, `youtube` or `files`. |
 | `max_results` | `8` | Most results shown at once. |
 | `suggestions` | `true` | Google and YouTube suggestions while you type. |
