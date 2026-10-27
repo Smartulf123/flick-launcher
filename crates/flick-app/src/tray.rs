@@ -144,10 +144,10 @@ pub fn build(
     }));
 
     let icon = Icon::from_rgba(circle_rgba(ICON_SIZE), ICON_SIZE, ICON_SIZE)?;
-    let icon = TrayIconBuilder::new()
+    let builder = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip(status)
-        .with_icon(icon)
+        .with_tooltip(status);
+    let icon = platform::with_tray_icon(icon, builder)
         .build()
         .context("could not create the tray icon")?;
 

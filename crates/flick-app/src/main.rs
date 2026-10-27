@@ -2,6 +2,7 @@
 
 mod actions;
 mod background;
+mod bar_menu;
 mod builtin_backgrounds;
 mod gallery;
 mod gallery_loader;
@@ -151,7 +152,7 @@ fn main() -> eframe::Result {
     };
     log::info!("indexing {roots:?}");
 
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flick")
             .with_inner_size([ui::WIDTH, ui::START_HEIGHT])
@@ -163,6 +164,7 @@ fn main() -> eframe::Result {
         centered: true,
         ..Default::default()
     };
+    platform::configure(&mut options);
 
     eframe::run_native(
         "Flick",

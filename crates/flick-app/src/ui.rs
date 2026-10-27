@@ -14,6 +14,7 @@ use flick_core::launcher::{Effect, Intent, Launcher};
 use flick_core::mode::{Action, ResultItem, ResultKind};
 
 use crate::actions::run_action;
+use crate::bar_menu;
 use crate::gallery::{Gallery, GalleryAction, Pick, Picks};
 use crate::gallery_loader::{Done, Job, Loader};
 use crate::hotkey::Hotkeys;
@@ -95,6 +96,10 @@ pub struct FlickApp {
     bar_position: Option<egui::Pos2>,
     /// The "Change hotkey" view, while it is open.
     capture: Option<Capture>,
+    /// The gear menu drawn inside the bar (where there is no system pop-up).
+    menu_open: bool,
+    /// A row of that menu was clicked this frame.
+    menu_choice: Option<TrayCommand>,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -133,6 +138,8 @@ impl FlickApp {
             picks: Picks::default(),
             bar_position: None,
             capture: None,
+            menu_open: false,
+            menu_choice: None,
         }
     }
 
@@ -156,6 +163,7 @@ impl FlickApp {
         self.pending.clear();
         self.was_focused = false;
         self.close_capture();
+        self.menu_open = false;
         self.services.window.hide();
     }
 
@@ -624,6 +632,16 @@ impl FlickApp {
             });
         });
 
+        // The in-bar gear menu takes the place of the results while open.
+        if self.menu_open {
+            ui.add_space(GAP as f32 * 0.8);
+            card.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                self.menu_choice = bar_menu::rows(ui, p);
+            });
+            return Vec::new();
+        }
+
         // No results, no second card: the bar is just the search card.
         let has_results = !self.launcher.results().is_empty();
         if has_results {
@@ -882,6 +900,10 @@ impl eframe::App for FlickApp {
             ctx.request_repaint();
         } else {
             for intent in std::mem::take(&mut self.pending) {
+                // Esc closes the in-bar menu first.
+                if intent == Intent::Escape && std::mem::take(&mut self.menu_open) {
+                    continue;
+                }
                 for effect in self.launcher.handle(intent) {
                     if self.apply(effect) == Visibility::Hidden {
                         // Drop the rest of this frame, typing included, so
@@ -905,19 +927,30 @@ impl eframe::App for FlickApp {
         if mover.drag_started() {
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
-        // Right-click on the bar: the Theme and Background menu, right here.
-        if (mover.secondary_clicked() || std::mem::take(&mut self.wants_bar_menu))
-            && let Some(tray) = &self.services.tray
-        {
-            platform::show_native_menu(tray, &self.services.window);
-            // The pop-up takes focus while open; give it back to the search box.
-            self.services.window.show_and_focus();
+        // Right-click on the bar or the gear: the background menu, as a
+        // system pop-up where there is one, else inside the bar.
+        if mover.secondary_clicked() || std::mem::take(&mut self.wants_bar_menu) {
+            let native = self
+                .services
+                .tray
+                .as_ref()
+                .is_some_and(|tray| platform::show_native_menu(tray, &self.services.window));
+            if native {
+                // The pop-up takes focus while open; give it back to the search box.
+                self.services.window.show_and_focus();
+            } else {
+                self.menu_open = !self.menu_open;
+            }
         }
 
         let content = egui::Frame::NONE
             .inner_margin(egui::Margin::same(GAP))
             .show(ui, |ui| self.draw(ui));
         self.fit_height(&ctx, content.response.rect.height());
+        if let Some(command) = self.menu_choice.take() {
+            self.menu_open = false;
+            self.handle_tray(&ctx, command);
+        }
         for effect in content.inner {
             if self.apply(effect) == Visibility::Hidden {
                 return;

@@ -10,7 +10,8 @@ pub enum Message {
 }
 
 // Written and read by the macOS and Linux socket; Windows sends nothing.
-#[cfg_attr(windows, allow(dead_code))]
+// Until that socket exists (Task 5) no system reads them.
+#[allow(dead_code)]
 impl Message {
     pub fn parse(line: &str) -> Option<Message> {
         match line.trim() {

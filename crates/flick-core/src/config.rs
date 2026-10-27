@@ -94,10 +94,20 @@ pub struct FilesConfig {
     pub reindex_minutes: u64,
 }
 
+/// The hotkey a new settings file starts with. Linux gets Ctrl+Alt+Space,
+/// because GNOME and KDE use Alt+Space for the window menu.
+pub fn default_hotkey() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "Ctrl+Alt+Space"
+    } else {
+        "Alt+Space"
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
-            hotkey: "Alt+Space".into(),
+            hotkey: default_hotkey().into(),
             default_mode: "google".into(),
             max_results: 8,
             suggestions: true,
@@ -331,7 +341,7 @@ background = \"wallpaper\"
         let c = Config::default();
         assert_eq!(
             (c.hotkey.as_str(), c.default_mode.as_str(), c.max_results),
-            ("Alt+Space", "google", 8)
+            (default_hotkey(), "google", 8)
         );
         assert_eq!(
             c.files.exclude_dir_names,
@@ -339,6 +349,17 @@ background = \"wallpaper\"
         );
         assert!(c.files.roots.is_empty());
         assert_eq!(c.files.reindex_minutes, 30);
+    }
+
+    #[test]
+    fn default_hotkey_suits_each_system() {
+        // Alt+Space opens the window menu on GNOME and KDE.
+        let expected = if cfg!(target_os = "linux") {
+            "Ctrl+Alt+Space"
+        } else {
+            "Alt+Space"
+        };
+        assert_eq!(default_hotkey(), expected);
     }
 
     #[test]

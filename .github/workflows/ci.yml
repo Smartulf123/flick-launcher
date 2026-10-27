@@ -1,0 +1,74 @@
+name: CI
+
+# Every push (any branch) and pull request: lint and test on Windows, macOS
+# and Ubuntu. Pushes also build preview programs for macOS and Linux that
+# testers can download from the run's page.
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libx11-dev libxkbcommon-dev libgl1-mesa-dev
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  preview:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: flick-macos
+          - os: ubuntu-22.04
+            name: flick-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libx11-dev libxkbcommon-dev libgl1-mesa-dev
+      - name: Build (macOS, Apple Silicon and Intel in one file)
+        if: runner.os == 'macOS'
+        run: |
+          cargo build --release -p flick-app --target aarch64-apple-darwin
+          cargo build --release -p flick-app --target x86_64-apple-darwin
+          lipo -create -output ${{ matrix.name }} \
+            target/aarch64-apple-darwin/release/flick \
+            target/x86_64-apple-darwin/release/flick
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release -p flick-app
+          cp target/release/flick ${{ matrix.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+          retention-days: 14
