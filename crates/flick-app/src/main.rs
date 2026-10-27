@@ -4,6 +4,8 @@ mod actions;
 mod autostart;
 mod background;
 mod builtin_backgrounds;
+#[expect(dead_code, reason = "wired into the window in the next task")]
+mod gallery;
 #[expect(dead_code, reason = "wired into the window in a later task")]
 mod gallery_loader;
 mod hotkey;
