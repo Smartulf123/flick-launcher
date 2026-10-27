@@ -217,6 +217,20 @@ impl Gallery {
                     }
                 }
             }
+            // Status sits at the right of this row, so showing or hiding it
+            // never moves the pictures.
+            let status = if self.downloading.is_some() {
+                Some("Downloading...")
+            } else if self.tab == Tab::Online {
+                self.error.as_deref()
+            } else {
+                None
+            };
+            if let Some(status) = status {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(status).color(p.muted));
+                });
+            }
         });
         ui.add_space(8.0);
 
@@ -225,15 +239,6 @@ impl Gallery {
         {
             action = GalleryAction::Jobs(jobs);
         }
-        if let Some(msg) = self
-            .downloading
-            .as_ref()
-            .map(|_| "Downloading...")
-            .or(self.error.as_deref())
-        {
-            ui.label(RichText::new(msg).color(p.muted));
-        }
-
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -249,20 +254,16 @@ impl Gallery {
                     }
                     action = GalleryAction::Pick(pick);
                 }
-                if self.tab == Tab::Online && self.page > 0 && self.page < self.last_page {
-                    ui.add_space(8.0);
-                    let label = if self.loading {
-                        "Loading..."
-                    } else {
-                        "Load more"
-                    };
-                    if ui.button(label).clicked()
+                if self.tab == Tab::Online {
+                    // Scrolling near the end loads the next page by itself.
+                    if near_the_end(ui.clip_rect().bottom(), ui.cursor().top())
                         && let Some(job) = self.load_more()
                     {
                         action = GalleryAction::Jobs(vec![job]);
                     }
-                } else if self.tab == Tab::Online && self.loading {
-                    ui.label(RichText::new("Loading...").color(p.muted));
+                    if self.loading {
+                        ui.label(RichText::new("Loading...").color(p.muted));
+                    }
                 }
             });
         action
@@ -273,7 +274,7 @@ impl Gallery {
         ui.horizontal(|ui| {
             let field = ui.add(
                 egui::TextEdit::singleline(&mut self.query)
-                    .hint_text(RichText::new("Search wallhaven.cc, e.g. anime girl").color(p.muted))
+                    .hint_text(RichText::new("Search here").color(p.muted))
                     .desired_width(360.0),
             );
             if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -281,16 +282,6 @@ impl Gallery {
             }
             if ui.button("Search").clicked() {
                 search = true;
-            }
-            ui.add_space(12.0);
-            for (on, label) in [
-                (&mut self.categories.general, "General"),
-                (&mut self.categories.anime, "Anime"),
-                (&mut self.categories.people, "People"),
-            ] {
-                if ui.toggle_value(on, label).changed() {
-                    search = true;
-                }
             }
         });
         ui.add_space(6.0);
@@ -318,7 +309,7 @@ impl Gallery {
         grid(ui, cards.len(), |ui, i, size| {
             let (b, texture) = cards[i];
             let is_current = *current == BackgroundSource::Builtin(b.id.into());
-            let response = card(ui, p, size, texture, is_current, Some((b.title, b.credit)));
+            let response = card(ui, p, size, texture, is_current);
             if response.clicked() {
                 picked = Some(Pick::Source(BackgroundSource::Builtin(b.id.into())));
             }
@@ -355,7 +346,7 @@ impl Gallery {
         grid(ui, files.len(), |ui, i, size| {
             let (path, texture) = &files[i];
             let is_current = *current == BackgroundSource::File(path.clone());
-            if card(ui, p, size, texture.as_ref(), is_current, None).clicked() {
+            if card(ui, p, size, texture.as_ref(), is_current).clicked() {
                 picked = Some(Pick::Source(BackgroundSource::File(path.clone())));
             }
         });
@@ -378,11 +369,7 @@ impl Gallery {
             let is_current = saved
                 .as_ref()
                 .is_some_and(|path| *current == BackgroundSource::File(path.clone()));
-            let response = card(ui, p, size, thumbs.get(&w.id), is_current, None);
-            let response = response.on_hover_ui(|ui| {
-                ui.label(format!("{}  from wallhaven.cc", w.resolution));
-                ui.hyperlink_to("Open page", &w.page_url);
-            });
+            let response = card(ui, p, size, thumbs.get(&w.id), is_current);
             if response.clicked() {
                 picked = Some(match saved {
                     Some(path) => Pick::Source(BackgroundSource::File(path)),
@@ -411,14 +398,13 @@ fn grid(ui: &mut egui::Ui, count: usize, mut draw: impl FnMut(&mut egui::Ui, usi
 }
 
 /// One picture card: the picture cropped to fill, an accent outline when
-/// it is the current background, and an optional title strip.
+/// it is the current background.
 fn card(
     ui: &mut egui::Ui,
     p: &Palette,
     size: egui::Vec2,
     texture: Option<&TextureHandle>,
     is_current: bool,
-    caption: Option<(&str, &str)>,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter_at(rect);
@@ -435,25 +421,6 @@ fn card(
             painter.rect_filled(rect, 10, p.border);
         }
     }
-    if let Some((title, credit)) = caption {
-        let strip =
-            egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 40.0), rect.max);
-        painter.rect_filled(strip, 0, Color32::from_black_alpha(150));
-        painter.text(
-            strip.left_top() + vec2(10.0, 5.0),
-            egui::Align2::LEFT_TOP,
-            title,
-            egui::FontId::proportional(14.0),
-            p.text,
-        );
-        painter.text(
-            strip.left_top() + vec2(10.0, 22.0),
-            egui::Align2::LEFT_TOP,
-            credit,
-            egui::FontId::proportional(11.0),
-            p.muted,
-        );
-    }
     if response.hovered() {
         painter.rect_filled(rect, 10, Color32::from_white_alpha(18));
     }
@@ -465,6 +432,16 @@ fn card(
     ui.painter()
         .rect_stroke(rect, 10, outline, egui::StrokeKind::Inside);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// How close (in points) the end of the grid must come into view before
+/// the next page is requested.
+const LOAD_AHEAD: f32 = 400.0;
+
+/// Whether the end of the grid (`content_bottom`) is close enough to the
+/// bottom of what is visible to load the next page.
+pub fn near_the_end(visible_bottom: f32, content_bottom: f32) -> bool {
+    content_bottom - visible_bottom < LOAD_AHEAD
 }
 
 /// A small texture for a gallery card.
@@ -519,8 +496,6 @@ mod tests {
                     id: (*id).into(),
                     thumb_url: format!("thumb-{id}"),
                     full_url: format!("full-{id}"),
-                    page_url: format!("page-{id}"),
-                    resolution: "1920x1080".into(),
                 })
                 .collect(),
             current_page: current,
@@ -633,6 +608,16 @@ mod tests {
             },
         );
         assert_eq!(ids(&g), ["a", "b"]);
+    }
+
+    #[test]
+    fn next_page_loads_when_the_end_is_close() {
+        // Visible area ends at y=600; grid ends at 900: 300 to go, load now.
+        assert!(near_the_end(600.0, 900.0));
+        // Grid ends far below: keep scrolling first.
+        assert!(!near_the_end(600.0, 1400.0));
+        // Grid already fully visible.
+        assert!(near_the_end(600.0, 500.0));
     }
 
     #[test]

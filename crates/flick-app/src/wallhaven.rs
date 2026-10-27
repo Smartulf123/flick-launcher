@@ -68,9 +68,6 @@ pub struct Wallpaper {
     pub id: String,
     pub thumb_url: String,
     pub full_url: String,
-    /// The picture's page on wallhaven.cc (credit to the uploader).
-    pub page_url: String,
-    pub resolution: String,
 }
 
 pub struct SearchPage {
@@ -94,8 +91,6 @@ pub fn parse_search(json: &str) -> anyhow::Result<SearchPage> {
                 id: text(w, "id")?,
                 thumb_url: text(w.get("thumbs")?, "small")?,
                 full_url: text(w, "path")?,
-                page_url: text(w, "url")?,
-                resolution: text(w, "resolution").unwrap_or_default(),
             })
         })
         .collect();
@@ -165,8 +160,6 @@ mod tests {
                 id: "mlzoy1".into(),
                 thumb_url: "https://th.wallhaven.cc/small/ml/mlzoy1.jpg".into(),
                 full_url: "https://w.wallhaven.cc/full/ml/wallhaven-mlzoy1.png".into(),
-                page_url: "https://wallhaven.cc/w/mlzoy1".into(),
-                resolution: "3840x2160".into(),
             }
         );
     }

@@ -220,8 +220,6 @@ mod tests {
             id: id.into(),
             thumb_url: "thumb".into(),
             full_url: "full".into(),
-            page_url: "page".into(),
-            resolution: "4x2".into(),
         }
     }
 
