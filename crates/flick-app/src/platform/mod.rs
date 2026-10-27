@@ -12,6 +12,8 @@
 //! - `with_tray_icon`: sets the tray icon (a template image on macOS).
 
 pub mod message;
+#[cfg(unix)]
+mod unix_instance;
 #[cfg(any(unix, test))]
 pub mod unix_paths;
 
