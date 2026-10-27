@@ -14,6 +14,8 @@ pub enum Icon {
     File,
     Folder,
     Info,
+    /// A gear, for the settings button.
+    Settings,
 }
 
 const GOOGLE_BLUE: Color32 = Color32::from_rgb(0x42, 0x85, 0xf4);
@@ -146,6 +148,19 @@ impl Icon {
                 ));
                 painter.line_segment([at(0.58, 0.10), at(0.58, 0.32)], stroke);
                 painter.line_segment([at(0.58, 0.32), at(0.80, 0.32)], stroke);
+            }
+            Icon::Settings => {
+                let c = r.center();
+                for i in 0..8 {
+                    let a = (i as f32 * 45.0).to_radians();
+                    let dir = vec2(a.cos(), a.sin());
+                    painter.line_segment(
+                        [c + dir * s * 0.30, c + dir * s * 0.46],
+                        Stroke::new(s * 0.14, color),
+                    );
+                }
+                painter.circle_stroke(c, s * 0.30, stroke);
+                painter.circle_stroke(c, s * 0.11, stroke);
             }
             Icon::Info => {
                 painter.circle_stroke(r.center(), s * 0.40, stroke);

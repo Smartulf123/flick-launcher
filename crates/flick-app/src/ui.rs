@@ -233,6 +233,13 @@ impl FlickApp {
                         clicked_mode = Some(i);
                     }
                 }
+                // Settings: the same Theme and Background menu as right-click.
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if settings_button(ui, p).clicked() {
+                        self.wants_bar_menu = true;
+                        ui.ctx().request_repaint();
+                    }
+                });
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -355,6 +362,21 @@ fn mode_chip(
         .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(theme::chip_tip(keyword))
+}
+
+/// The gear at the end of the chip row; opens Theme and Background.
+fn settings_button(ui: &mut egui::Ui, p: &Palette) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(26.0, 26.0), egui::Sense::click());
+    let (fill, color) = if response.hovered() {
+        (p.selected, p.text)
+    } else {
+        (Color32::TRANSPARENT, p.muted)
+    };
+    ui.painter().rect_filled(rect, 8, fill);
+    Icon::Settings.paint(ui.painter(), rect.shrink(5.0), color);
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Theme and background")
 }
 
 /// Draws a result's icon and returns its kind label ("Google", "Microsoft
