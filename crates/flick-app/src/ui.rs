@@ -585,11 +585,14 @@ fn mode_chip(
     keyword: &str,
     active: bool,
 ) -> egui::Response {
-    let (fill, stroke, text) = if active {
-        (p.selected, p.accent, p.text)
+    // Every chip has its own dark backing and bright text; the active one
+    // stands out by its fill and accent outline.
+    let (fill, stroke) = if active {
+        (p.selected, p.accent)
     } else {
-        (Color32::TRANSPARENT, p.border, p.muted)
+        (theme::chip_fill(p), p.border)
     };
+    let text = p.text;
     egui::Frame::NONE
         .fill(fill)
         .stroke(egui::Stroke::new(1.0, stroke))
@@ -611,13 +614,13 @@ fn mode_chip(
 /// The gear at the end of the chip row; opens Theme and Background.
 fn settings_button(ui: &mut egui::Ui, p: &Palette) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(26.0, 26.0), egui::Sense::click());
-    let (fill, color) = if response.hovered() {
-        (p.selected, p.text)
+    let fill = if response.hovered() {
+        p.selected
     } else {
-        (Color32::TRANSPARENT, p.muted)
+        theme::chip_fill(p)
     };
     ui.painter().rect_filled(rect, 8, fill);
-    Icon::Settings.paint(ui.painter(), rect.shrink(5.0), color);
+    Icon::Settings.paint(ui.painter(), rect.shrink(5.0), p.text);
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text("Theme and background")

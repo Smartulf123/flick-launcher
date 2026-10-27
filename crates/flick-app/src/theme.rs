@@ -36,6 +36,12 @@ pub fn card_fill(palette: &Palette, tint: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, (tint.clamp(0.0, 1.0) * 255.0) as u8)
 }
 
+/// Behind the mode chips and the gear: nearly solid, so their text stays
+/// readable over bright pictures while the rest of the card shows through.
+pub fn chip_fill(palette: &Palette) -> Color32 {
+    card_fill(palette, 0.85)
+}
+
 /// Sets the palette and text sizes. Called at startup and on theme change.
 pub fn apply(ctx: &egui::Context, palette: &Palette) {
     let mut visuals = egui::Visuals::dark();
@@ -84,6 +90,16 @@ mod tests {
         let fill = card_fill(p, 0.55);
         assert_eq!(fill.a(), 140);
         assert_eq!(card_fill(p, 1.0), p.background);
+    }
+
+    #[test]
+    fn chips_are_backed_darker_than_any_usual_card() {
+        // The chips and gear keep a near-solid backing, so their text reads
+        // on bright pictures even when the card itself is see-through.
+        let fill = chip_fill(&KANAGAWA);
+        assert!(fill.a() >= 215, "{}", fill.a());
+        assert!(fill.a() > card_fill(&KANAGAWA, 0.55).a());
+        assert_eq!(fill.to_opaque(), KANAGAWA.background);
     }
 
     #[test]
