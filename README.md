@@ -6,7 +6,17 @@ A keyboard launcher for Windows 11, written entirely in Rust. Press a hotkey and
 - **YouTube**: Enter opens YouTube search results.
 - **Files**: fuzzy search over your Desktop, Documents and Downloads as you type (`bdgt` finds `budget_2026.xlsx`). Arrow keys pick, Enter opens.
 
-The mode chips at the top show where you are. Tab and Shift+Tab switch modes, typing a prefix (`g `, `yt `, `f `) jumps to one, and you can click a chip or a result (hover a chip to see its prefix). In Google and YouTube mode, suggestions appear under your search as you type. Drag the cards' edges or the gap between them to move the window; the top 8 results are always shown in full, and the window slides up if needed to stay on the screen. Click the gear at the top right (or right-click the bar) for Theme and Background. Esc or clicking elsewhere hides the bar. Flick lives in the tray (Start with Windows, Theme, Background, Reload index, Quit).
+The mode chips at the top show where you are. Tab and Shift+Tab switch modes, typing a prefix (`g `, `yt `, `f `) jumps to one, and you can click a chip or a result (hover a chip to see its prefix). In Google and YouTube mode, suggestions appear under your search as you type. Drag the cards' edges or the gap between them to move the window; the top 8 results are always shown in full, and the window slides up if needed to stay on the screen. Esc or clicking elsewhere hides the bar. Flick lives in the tray (Start with Windows, Background, Reload index, Quit).
+
+## Backgrounds
+
+Click the gear at the top right of the bar (or right-click the bar, or use the tray's Background menu):
+
+- **Browse backgrounds...** opens the gallery inside the bar's window. **Built-in** has six public-domain pictures that ship with Flick; **Downloaded** has pictures you picked before; **Search online** searches [wallhaven.cc](https://wallhaven.cc) (safe-for-work only, always) with General, Anime and People toggles. Click a picture to use it; Esc or **Back** returns to the bar.
+- **Choose your own picture...** uses any JPG, PNG or WebP on your PC.
+- **None** shows the plain Kanagawa background.
+
+Pictures picked online are downloaded once, scaled to 1280 px wide, and kept in `%APPDATA%\flick\backgrounds`.
 
 ## Rust only
 
@@ -41,11 +51,10 @@ Run `target\release\flick.exe`. Nothing appears until you press the hotkey (Alt+
 | `files.roots` | `[]` | Folders to index. Empty means Desktop, Documents and Downloads (OneDrive folders included). |
 | `files.exclude_dir_names` | `.git`, `node_modules`, `target`, `$RECYCLE.BIN` | Folder names skipped with their contents. |
 | `files.reindex_minutes` | `30` | How often the index is rebuilt. `0` turns it off. |
-| `appearance.theme` | `"kanagawa"` | `kanagawa`, `tokyo-night`, `rose-pine`, `catppuccin-mocha`, `gruvbox` or `dracula`. Also in the tray's Theme menu. |
-| `appearance.background` | `"wallpaper"` | `wallpaper` (your desktop wallpaper), `none`, or a path to a JPG, PNG or WebP. Also in the tray's Background menu. |
+| `appearance.background` | `"builtin:great-wave"` | `builtin:<id>` (`great-wave`, `red-fuji`, `starry-night`, `impression-sunrise`, `earthrise`, `pillars-of-creation`), `none`, or a path to a JPG, PNG or WebP. Set from the gear menu. |
 | `appearance.tint` | `0.55` | How dark the cards are over the picture, from `0` (clear) to `1` (solid). |
 
-The tray's Theme and Background menus save your choice into this file, rewriting it (hand-written comments are not kept).
+Choosing a background saves it into this file, rewriting it (hand-written comments are not kept).
 
 A broken config file never stops Flick: it falls back to the defaults and writes the error to `%APPDATA%\flick\flick.log` (replaced at each start).
 
@@ -68,6 +77,18 @@ That is the whole contract, modelled on Flow Launcher's plugins: each mode retur
 
 The index accounts for most of the memory (about 240 bytes per entry). A more compact index layout is the next memory win.
 
+## Credits
+
+Built-in backgrounds, all public domain via Wikimedia Commons (details in `crates/flick-app/assets/backgrounds/CREDITS.md`):
+
+- *The Great Wave off Kanagawa* and *Fine Wind, Clear Morning (Red Fuji)*, Katsushika Hokusai
+- *The Starry Night*, Vincent van Gogh
+- *Impression, Sunrise*, Claude Monet
+- *Earthrise*, NASA, Apollo 8 (Bill Anders)
+- *Pillars of Creation*, NASA, ESA and the Hubble Heritage Team
+
+Online backgrounds come from [wallhaven.cc](https://wallhaven.cc) and belong to their creators. Flick downloads one only when you pick it, for your own background, and never bundles or uploads them.
+
 ## Later
 
-Apps, Windows settings and GitHub modes; start at login; an NTFS MFT/USN or Everything-backed index for whole-PC search; frecency ranking; a settings window; an installer with cargo-packager.
+Apps, Windows settings and GitHub modes; an NTFS MFT/USN or Everything-backed index for whole-PC search; frecency ranking; an installer with cargo-packager.
