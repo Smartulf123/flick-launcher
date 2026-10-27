@@ -1,32 +1,58 @@
 # Flick
 
-**A fast keyboard launcher for Windows 11, written in Rust.**
+**A fast keyboard launcher for Windows, macOS and Linux, written in Rust.**
 
-Press **Alt+Space** anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. Flick searches three places:
+Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. Flick searches three places:
 
 - **Google**: Enter opens a Google search in your default browser, with suggestions as you type.
 - **YouTube**: the same, for YouTube search results.
-- **Files**: fuzzy search over your own Desktop, Documents and Downloads folders as you type (`bdgt` finds `budget_2026.xlsx`). Files and folders show their real Windows icons.
+- **Files**: fuzzy search over your own Desktop, Documents and Downloads folders as you type (`bdgt` finds `budget_2026.xlsx`). On Windows, files and folders show their real Windows icons.
 
-It runs quietly in the tray, starts with Windows, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
+It runs quietly in the tray (the menu bar on a Mac), starts when you log in, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
 ## Download
 
-1. Download **`flick.exe`** from the [latest release](../../releases/latest).
+All downloads are on the [latest release](../../releases/latest) page. None of them need anything else installed.
+
+### Windows 10 or 11
+
+1. Download **`Flick-windows-x64.exe`**.
 2. Move it somewhere it can stay, for example a new folder `C:\Tools\Flick`. Flick adds itself to your startup apps from wherever it is, so don't run it straight from Downloads if you tidy that folder.
 3. Double-click it. Nothing appears yet; that's normal. Press **Alt+Space**.
 
 Windows may show "Windows protected your PC" the first time, because the program isn't code-signed. Click **More info**, then **Run anyway**.
 
-Needs Windows 10 or 11 (64-bit). Nothing else to install.
+To remove Flick: right-click its tray icon, untick **Start with Windows**, choose **Quit**, and delete the program and the folder `%APPDATA%\flick`.
 
-To remove Flick: right-click its tray icon, untick **Start with Windows**, choose **Quit**, and delete `flick.exe` and the folder `%APPDATA%\flick`.
+### macOS 11 or newer (preview)
+
+1. Download **`Flick-macos.dmg`** (one download for Apple Silicon and Intel Macs), open it and drag **Flick** to **Applications**.
+2. Open Flick. macOS blocks it the first time because it isn't notarized by Apple: open **System Settings → Privacy & Security** and click **Open Anyway**.
+3. A small circle appears in the menu bar; there is no Dock icon. Press **Option+Space**.
+
+To remove Flick: untick **Open at Login** in its menu-bar menu, choose **Quit**, delete Flick from Applications, and delete `~/Library/Application Support/flick`.
+
+### Ubuntu 22.04 or newer (preview)
+
+1. Download **`flick_<version>_amd64.deb`** and double-click it to install (or run `sudo apt install ./flick_*_amd64.deb`).
+2. Start **Flick** from the app list. A small circle appears in the top bar.
+3. Press **Ctrl+Alt+Space**.
+
+On Ubuntu's normal (Wayland) session apps can't grab a key themselves, so Flick adds a shortcut named "Flick" to **Settings → Keyboard → Custom Shortcuts** that runs `flick --toggle`. On other Wayland desktops (such as KDE Plasma) bind `flick --toggle` to a key in your system's shortcut settings; Flick's tray tip reminds you.
+
+To remove Flick: untick **Start at login**, choose **Quit**, run `sudo apt remove flick`, and delete `~/.config/flick`, `~/.local/share/flick` and `~/.cache/flick`.
+
+### Other Linux (preview)
+
+Download **`Flick-linux-x86_64.AppImage`**, make it runnable (`chmod +x Flick-linux-x86_64.AppImage`) and run it.
+
+The macOS and Linux versions are new and have not been tried by hand on every setup yet. If something doesn't work, please [open an issue](../../issues).
 
 ## Using it
 
 | Do this | To |
 |---|---|
-| **Alt+Space** | Show or hide the bar |
+| **Alt+Space** (Mac: Option+Space, Linux: Ctrl+Alt+Space) | Show or hide the bar |
 | Type, then **Enter** | Search, or open the selected file |
 | **Tab** / **Shift+Tab** | Switch between Google, YouTube and Files |
 | **↑** / **↓** | Pick a result |
@@ -34,11 +60,11 @@ To remove Flick: right-click its tray icon, untick **Start with Windows**, choos
 | Drag the edges of the bar | Move it |
 | Gear → **Change hotkey...** | Pick your own hotkey: press the keys, then Enter |
 
-You can also click a mode chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows**, **Background**, **Change hotkey...**, **Reload index** (scans your folders again right away) and **Quit**.
+You can also click a mode chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows** (**Open at Login** on a Mac, **Start at login** on Linux), **Background**, **Change hotkey...**, **Reload index** (scans your folders again right away) and **Quit**. On a Mac and on Linux the gear opens the same choices inside the bar.
 
 ### Your files
 
-Out of the box Flick indexes the Desktop, Documents and Downloads folders of whoever is signed in to Windows, including OneDrive-synced ones. To search other folders, list them under `files.roots` in the settings file (see [Settings](#settings)), then restart Flick (**Quit** in the tray menu, then start `flick.exe` again). The index refreshes itself every 30 minutes.
+Out of the box Flick indexes the Desktop, Documents and Downloads folders of whoever is signed in (on Windows including OneDrive-synced ones; on Linux whatever your system calls those folders, in any language). To search other folders, list them under `files.roots` in the settings file (see [Settings](#settings)), then restart Flick (**Quit** in the tray menu, then start it again). The index refreshes itself every 30 minutes.
 
 ### Backgrounds
 
@@ -53,11 +79,11 @@ Click the gear and choose:
 
 ## Settings
 
-Flick creates `%APPDATA%\flick\config.toml` the first time it runs. Open it in any text editor; changes apply the next time Flick starts (**Quit** in the tray menu, then start `flick.exe` again).
+Flick creates `config.toml` the first time it runs: in `%APPDATA%\flick` on Windows, `~/Library/Application Support/flick` on a Mac and `~/.config/flick` on Linux. Open it in any text editor; changes apply the next time Flick starts (**Quit** in the tray menu, then start it again).
 
 | Setting | Default | What it does |
 |---|---|---|
-| `hotkey` | `"Alt+Space"` | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt`, `Ctrl`, `Shift`, `Super` (the Windows key), e.g. `"Ctrl+Space"`. |
+| `hotkey` | `"Alt+Space"` (Linux: `"Ctrl+Alt+Space"`) | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt` (Option on a Mac), `Ctrl`, `Shift`, `Super` (the Windows key, or Cmd on a Mac), e.g. `"Ctrl+Space"`. |
 | `default_mode` | `"google"` | Mode the bar opens in: `google`, `youtube` or `files`. |
 | `max_results` | `8` | Most results shown at once. |
 | `suggestions` | `true` | Google and YouTube suggestions while you type. |
@@ -67,7 +93,7 @@ Flick creates `%APPDATA%\flick\config.toml` the first time it runs. Open it in a
 | `appearance.background` | `"builtin:great-wave"` | Set from the gear menu: `builtin:<name>`, `none`, or a path to a picture. |
 | `appearance.tint` | `0.55` | How dark the bar is over the picture, from `0` (clear) to `1` (solid). |
 
-Choosing a background from the menu saves it into this file (comments you added are not kept). A broken settings file never stops Flick: it uses the defaults and writes what went wrong to `%APPDATA%\flick\flick.log`.
+Choosing a background from the menu saves it into this file (comments you added are not kept). A broken settings file never stops Flick: it uses the defaults and writes what went wrong to `flick.log` in the same folder.
 
 ## Privacy
 
@@ -80,7 +106,7 @@ Your file index stays in memory on your PC and is never sent anywhere.
 
 ## Building from source
 
-Needs [Rust](https://rustup.rs) 1.95 or newer and the Visual Studio C++ build tools.
+Needs [Rust](https://rustup.rs) 1.95 or newer. On Windows also the Visual Studio C++ build tools; on Ubuntu `sudo apt install pkg-config libssl-dev`.
 
 ```bash
 git clone https://github.com/Smartulf123/flick-launcher.git
@@ -88,16 +114,16 @@ cd flick-launcher
 cargo build --release
 ```
 
-The program is `target\release\flick.exe`. `cargo test --workspace` runs the tests.
+The program is `target/release/flick` (`flick.exe` on Windows). `cargo test --workspace` runs the tests. [`docs/testing.md`](docs/testing.md) lists the checks done by hand on each system.
 
 ### How it's built
 
-Every line is Rust: no Electron, Tauri, webview or JavaScript. The window is [egui/eframe](https://github.com/emilk/egui) with the OpenGL renderer, and Windows APIs go through Microsoft's [windows](https://github.com/microsoft/windows-rs) crate.
+Every line is Rust: no Electron, Tauri, webview or JavaScript. The window is [egui/eframe](https://github.com/emilk/egui) with the OpenGL renderer. Everything that differs between Windows, macOS and Linux lives in `crates/flick-app/src/platform/`; Windows APIs go through Microsoft's [windows](https://github.com/microsoft/windows-rs) crate, and the Linux tray talks D-Bus in pure Rust, so no GTK is needed.
 
 - `crates/flick-core`: the modes, file index, fuzzy matching ([nucleo](https://github.com/helix-editor/nucleo)), settings and the launcher's state machine. No UI code, fully unit-tested.
-- `crates/flick-app`: the window, hotkey, tray icon, background gallery and Windows calls.
+- `crates/flick-app`: the window, hotkey, tray icon, background gallery and the per-system code.
 
-It is light: a single 10 MB program that uses no CPU while hidden and about 80 MB of memory with a 150,000-file index (most of that is the index).
+It is light: a single program of about 10 MB that uses no CPU while hidden and about 80 MB of memory with a 150,000-file index (most of that is the index).
 
 ### Adding a mode
 

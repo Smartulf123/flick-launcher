@@ -1,0 +1,99 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds every download and publishes a GitHub
+# release with them. A tag with a dash (v0.2.0-rc.1) makes a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p flick-app
+      - shell: pwsh
+        run: Copy-Item target/release/flick.exe Flick-windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: Flick-windows-x64.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build for Apple Silicon and Intel, join into one program
+        run: |
+          cargo build --release -p flick-app --target aarch64-apple-darwin
+          cargo build --release -p flick-app --target x86_64-apple-darwin
+          mkdir -p target/release
+          lipo -create -output target/release/flick \
+            target/aarch64-apple-darwin/release/flick \
+            target/x86_64-apple-darwin/release/flick
+      - run: cargo install cargo-packager --locked
+      - name: Package Flick.app into a .dmg
+        run: |
+          cargo packager --release -p flick-app --formats dmg
+          cp "$(find target/release -maxdepth 2 -name '*.dmg' | head -n 1)" Flick-macos.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: Flick-macos.dmg
+
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      # The AppImage tools are AppImages themselves; the runner has no FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libx11-dev libxkbcommon-dev libgl1-mesa-dev
+      - run: cargo build --release -p flick-app
+      - run: cargo install cargo-packager --locked
+      - name: Package a .deb and an AppImage
+        run: |
+          cargo packager --release -p flick-app --formats deb,appimage
+          version="${GITHUB_REF_NAME#v}"
+          cp "$(find target/release -maxdepth 2 -name '*.deb' | head -n 1)" "flick_${version}_amd64.deb"
+          cp "$(find target/release -maxdepth 2 -name '*.AppImage' | head -n 1)" Flick-linux-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            flick_*_amd64.deb
+            Flick-linux-x86_64.AppImage
+
+  publish:
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Flick ${GITHUB_REF_NAME#v}" \
+            --notes-file .github/release-notes.md \
+            --generate-notes $pre

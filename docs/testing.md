@@ -64,3 +64,17 @@ Check:
 ### What to send back
 
 For each item that fails: what you did, what happened instead, and a screenshot if it is about the look. Also say which macOS or Ubuntu version you used.
+
+## Release check (every system)
+
+Install each download the way a new user would (see the README's Download section), then:
+
+- [ ] The hotkey (Alt+Space on Windows, Option+Space on a Mac, Ctrl+Alt+Space on Ubuntu) shows the bar, and you can type straight away.
+- [ ] A Google search opens the browser; a YouTube search opens YouTube.
+- [ ] A file on your Desktop is found in Files mode and opens with Enter.
+- [ ] The tray / menu-bar menu works: start at login, Background, Change hotkey, Reload index, Quit.
+- [ ] Start at login: log out and in again (or restart); Flick is running and the hotkey works.
+- [ ] The gallery opens from the gear; an online picture previews on click; the heart keeps it under Favorites; Back returns to the bar.
+- [ ] **Change hotkey...**: pick a new combination, Enter; it works at once and still works after Quit and start again.
+- [ ] Starting Flick a second time does not start a second copy.
+- [ ] Ubuntu only: **Settings → Keyboard → Custom Shortcuts** has a "Flick" entry with your hotkey.

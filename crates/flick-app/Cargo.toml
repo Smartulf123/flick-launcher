@@ -44,3 +44,25 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsA
 
 [dev-dependencies]
 tempfile = "3"
+
+# Installers, built by .github/workflows/release.yml with cargo-packager:
+# Flick.app in a .dmg (macOS), a .deb and an AppImage (Linux).
+[package.metadata.packager]
+product-name = "Flick"
+identifier = "io.github.smartulf123.flick"
+description = "A fast keyboard launcher: search Google, YouTube and your files"
+homepage = "https://github.com/Smartulf123/flick-launcher"
+authors = ["Kasper Aune Dahl"]
+category = "Utility"
+icons = ["assets/icon.png"]
+binaries = [{ path = "flick", main = true }]
+
+[package.metadata.packager.macos]
+# A menu-bar app: no Dock icon (LSUIElement).
+background-app = true
+minimum-system-version = "11.0"
+# Ad-hoc signature: not a developer ID, but Apple Silicon needs one to run.
+signing-identity = "-"
+
+[package.metadata.packager.deb]
+depends = ["libssl3", "libxkbcommon-x11-0", "libgl1"]
