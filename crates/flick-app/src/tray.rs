@@ -210,17 +210,18 @@ mod tests {
         assert_eq!(status("Alt+Space", None, None), "Flick (Alt+Space)");
     }
 
-    /// The app icon for the installers: the tray's circle, large. Run once
-    /// by hand when the drawing changes: `cargo test -p flick-app
-    /// write_app_icon -- --ignored`.
+    /// The app icons for the installers: the tray's circle in the sizes
+    /// macOS's icon format has slots for. Run once by hand when the drawing
+    /// changes: `cargo test -p flick-app write_app_icons -- --ignored`.
     #[test]
-    #[ignore = "writes crates/flick-app/assets/icon.png"]
-    fn write_app_icon() {
-        let size = 1024;
-        let image = image::RgbaImage::from_raw(size, size, circle_rgba(size)).unwrap();
-        image
-            .save(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icon.png"))
-            .unwrap();
+    #[ignore = "writes crates/flick-app/assets/icons/*.png"]
+    fn write_app_icons() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icons");
+        std::fs::create_dir_all(dir).unwrap();
+        for size in [32, 128, 256, 512] {
+            let image = image::RgbaImage::from_raw(size, size, circle_rgba(size)).unwrap();
+            image.save(format!("{dir}/{size}x{size}.png")).unwrap();
+        }
     }
 
     #[test]
