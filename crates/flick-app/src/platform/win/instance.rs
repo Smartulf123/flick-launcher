@@ -4,12 +4,14 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::core::HSTRING;
 
+use crate::platform::message::Message;
+
 const MUTEX_NAME: &str = r"Local\FlickLauncher";
 
 /// Holds the named mutex; the next Flick may start once this is dropped.
-pub struct InstanceGuard(HANDLE);
+pub struct Guard(HANDLE);
 
-impl Drop for InstanceGuard {
+impl Drop for Guard {
     fn drop(&mut self) {
         // SAFETY: the handle came from CreateMutexW and is closed exactly once.
         unsafe {
@@ -18,12 +20,20 @@ impl Drop for InstanceGuard {
     }
 }
 
-/// `None` when another Flick is already running.
-pub fn acquire() -> Option<InstanceGuard> {
+/// `None` when another Flick is already running. On Windows a second
+/// Flick just exits, so `on_message` is never called.
+pub fn acquire(on_message: impl Fn(Message) + Send + 'static) -> Option<Guard> {
+    drop(on_message);
     acquire_named(MUTEX_NAME)
 }
 
-fn acquire_named(name: &str) -> Option<InstanceGuard> {
+/// Windows has no `flick --toggle`; nothing is sent.
+pub fn send(msg: Message) -> bool {
+    let _ = msg;
+    false
+}
+
+fn acquire_named(name: &str) -> Option<Guard> {
     // SAFETY: plain Win32 call; the name outlives the call.
     unsafe {
         let handle = CreateMutexW(None, false, &HSTRING::from(name)).ok()?;
@@ -31,7 +41,7 @@ fn acquire_named(name: &str) -> Option<InstanceGuard> {
             let _ = CloseHandle(handle);
             return None;
         }
-        Some(InstanceGuard(handle))
+        Some(Guard(handle))
     }
 }
 

@@ -20,12 +20,11 @@ use crate::hotkey::Hotkeys;
 use crate::hotkey_picker::{Capture, Step};
 use crate::hotkey_text::{Os, display};
 use crate::icons::Icon;
-use crate::shell_icons::IconCache;
+use crate::platform::{self, BarWindow, IconCache, autostart, paths};
 use crate::theme::{self, KANAGAWA, Palette};
 use crate::tray::{self, BackgroundChoice, Tray, TrayCommand};
 use crate::wallhaven::{self, Wallpaper};
-use crate::window::WindowHandle;
-use crate::{autostart, background, paths, placement};
+use crate::{background, placement};
 
 pub const WIDTH: f32 = 640.0;
 /// Height before the first frame measures the real content.
@@ -49,7 +48,7 @@ pub struct Services {
     pub results_changed: Arc<AtomicBool>,
     /// Set by the hotkey handler each time it shows the bar.
     pub shown: Arc<AtomicBool>,
-    pub window: WindowHandle,
+    pub window: BarWindow,
     /// The system-wide hotkey; `None` if the hotkey manager would not start.
     pub hotkey: Option<Hotkeys>,
     /// Keeps the tray icon alive; `None` if it could not be created.
@@ -214,7 +213,7 @@ impl FlickApp {
 
     fn handle_tray(&mut self, ctx: &egui::Context, command: TrayCommand) {
         match command {
-            TrayCommand::ToggleStartWithWindows => autostart::toggle(),
+            TrayCommand::ToggleStartAtLogin => autostart::toggle(),
             TrayCommand::Background(choice) => self.set_background(ctx, choice),
             TrayCommand::ChangeHotkey => self.open_capture(ctx),
             TrayCommand::ReloadIndex => (self.services.reindex)(),
@@ -755,7 +754,7 @@ fn row_icon(
                 }
                 None => {
                     icon_slot(ui, Icon::for_kind(item.kind), ICON_SIZE, fallback);
-                    String::new()
+                    crate::icons::kind_label(path, is_dir)
                 }
             }
         }
@@ -910,7 +909,7 @@ impl eframe::App for FlickApp {
         if (mover.secondary_clicked() || std::mem::take(&mut self.wants_bar_menu))
             && let Some(tray) = &self.services.tray
         {
-            tray.show_bar_menu(self.services.window.raw());
+            platform::show_native_menu(tray, &self.services.window);
             // The pop-up takes focus while open; give it back to the search box.
             self.services.window.show_and_focus();
         }

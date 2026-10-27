@@ -205,10 +205,31 @@ impl Icon {
     }
 }
 
+/// The type label for a file the system gave no name for: "Folder", the
+/// extension in capitals ("PDF"), or "File".
+pub fn kind_label(path: &std::path::Path, is_dir: bool) -> String {
+    if is_dir {
+        return "Folder".to_owned();
+    }
+    path.extension()
+        .map(|ext| ext.to_string_lossy().to_uppercase())
+        .filter(|ext| !ext.is_empty())
+        .unwrap_or_else(|| "File".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use flick_core::mode::ResultKind;
+    use std::path::Path;
+
+    #[test]
+    fn files_without_a_system_type_name_show_their_extension() {
+        assert_eq!(kind_label(Path::new("C:/a/report.pdf"), false), "PDF");
+        assert_eq!(kind_label(Path::new("C:/a/Makefile"), false), "File");
+        assert_eq!(kind_label(Path::new("C:/a/photos"), true), "Folder");
+        assert_eq!(kind_label(Path::new("C:/a/old.photos.d"), true), "Folder");
+    }
 
     #[test]
     fn result_kinds_get_their_icon() {

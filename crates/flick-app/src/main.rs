@@ -1,7 +1,6 @@
 #![windows_subsystem = "windows"]
 
 mod actions;
-mod autostart;
 mod background;
 mod builtin_backgrounds;
 mod gallery;
@@ -11,16 +10,13 @@ mod hotkey_picker;
 mod hotkey_text;
 mod http;
 mod icons;
-mod paths;
 mod placement;
-mod shell_icons;
-mod single_instance;
+mod platform;
 mod suggest_fetch;
 mod theme;
 mod tray;
 mod ui;
 mod wallhaven;
-mod window;
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -30,6 +26,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use flick_core::config::{self, BackgroundSource};
+
+use crate::platform::message::Message;
 use flick_core::index::{self, SharedIndex};
 use flick_core::launcher::Launcher;
 use flick_core::modes::suggest::{SuggestionCache, Suggestions};
@@ -79,7 +77,7 @@ impl Reindexer {
 }
 
 fn start_logging() {
-    let path = paths::log_path();
+    let path = platform::paths::log_path();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -94,18 +92,25 @@ fn start_logging() {
 }
 
 fn main() -> eframe::Result {
-    let Some(_instance) = single_instance::acquire() else {
+    // `flick --toggle` (bound to a key where Flick cannot grab one itself)
+    // only tells the running Flick, then exits.
+    if std::env::args().nth(1).as_deref() == Some("--toggle") {
+        platform::instance::send(Message::Toggle);
+        return Ok(());
+    }
+    let Some(_instance) = platform::instance::acquire(|_| {}) else {
+        platform::instance::send(Message::Show);
         return Ok(());
     };
     start_logging();
 
-    let config_path = paths::config_path();
+    let config_path = platform::paths::config_path();
     let first_run = !config_path.exists();
     let (config, error) = config::load_or_create(&config_path);
     if let Some(e) = error {
         log::error!("{}: {e}; using defaults", config_path.display());
     }
-    autostart::sync(first_run);
+    platform::autostart::sync(first_run);
 
     // "Results may have changed" (index rebuilt, suggestions arrived). The
     // window's context is filled in once it exists, so background threads
@@ -140,7 +145,7 @@ fn main() -> eframe::Result {
     let launcher = Launcher::new(registry, default_mode, config.max_results);
 
     let roots = if config.files.roots.is_empty() {
-        paths::default_roots()
+        platform::paths::default_roots()
     } else {
         config.files.roots.clone()
     };
@@ -169,7 +174,7 @@ fn main() -> eframe::Result {
             theme::apply(&ctx, &theme::KANAGAWA);
             let background_source = BackgroundSource::from_setting(&appearance.background);
             let picture = ui::load_picture(&ctx, &background_source);
-            let window = window::WindowHandle::from_creation_context(cc)?;
+            let window = platform::BarWindow::from_creation_context(cc)?;
             window.round_corners();
             let shown = Arc::new(AtomicBool::new(false));
             let mut hotkeys =
@@ -199,7 +204,7 @@ fn main() -> eframe::Result {
                 let (queue, ctx) = (tray_queue.clone(), ctx.clone());
                 tray::build(
                     &tray::tooltip(&config.hotkey, hotkey_error.as_deref()),
-                    autostart::FLICK.is_enabled(),
+                    platform::autostart::is_enabled(),
                     &background_source,
                     move |command| {
                         queue

@@ -21,9 +21,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 /// The search bar's window, as a plain number so it can cross threads.
 #[derive(Debug, Clone, Copy)]
-pub struct WindowHandle(isize);
+pub struct BarWindow(isize);
 
-impl WindowHandle {
+impl BarWindow {
     pub fn from_creation_context(cc: &eframe::CreationContext<'_>) -> anyhow::Result<Self> {
         match cc.window_handle()?.as_raw() {
             RawWindowHandle::Win32(handle) => Ok(Self(handle.hwnd.get())),
@@ -32,7 +32,7 @@ impl WindowHandle {
     }
 
     /// The raw window handle, for APIs that take it as a number.
-    pub fn raw(self) -> isize {
+    pub(super) fn raw(self) -> isize {
         self.0
     }
 

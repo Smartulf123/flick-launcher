@@ -83,6 +83,13 @@ pub fn sync(first_run: bool) {
     }
 }
 
+/// The tray menu's name for this setting.
+pub const LABEL: &str = "Start with Windows";
+
+pub fn is_enabled() -> bool {
+    FLICK.is_enabled()
+}
+
 /// The tray checkbox: flip the registry entry.
 pub fn toggle() {
     let result = if FLICK.is_enabled() {

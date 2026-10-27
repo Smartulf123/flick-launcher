@@ -1,12 +1,14 @@
-//! The tray icon: shows the hotkey, and offers Start with Windows,
+//! The tray icon: shows the hotkey, and offers start at login,
 //! Background, Change hotkey, Reload index and Quit.
 
 use anyhow::Context as _;
 use flick_core::config::BackgroundSource;
 use tray_icon::menu::{
-    CheckMenuItem, ContextMenu, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
+    CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
 };
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+
+use crate::platform;
 
 pub const ICON_SIZE: u32 = 32;
 
@@ -22,8 +24,9 @@ pub enum BackgroundChoice {
 /// What the tray menu asks the app to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCommand {
-    /// The checkbox was clicked; Windows has already flipped its tick.
-    ToggleStartWithWindows,
+    /// The start-at-login checkbox was clicked; the menu has already
+    /// flipped its tick.
+    ToggleStartAtLogin,
     Background(BackgroundChoice),
     /// Opens the "Change hotkey" view in the bar.
     ChangeHotkey,
@@ -64,13 +67,9 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Pops up the background choices at the mouse pointer, over `hwnd`.
-    /// Blocks until the menu closes; a choice arrives as a normal tray command.
-    pub fn show_bar_menu(&self, hwnd: isize) {
-        // SAFETY: `hwnd` is the bar's own live window, owned by this thread.
-        unsafe {
-            self.bar_menu.show_context_menu_for_hwnd(hwnd, None);
-        }
+    /// The gear menu's items (background choices and Change hotkey).
+    pub fn bar_menu(&self) -> &Menu {
+        &self.bar_menu
     }
 
     /// Updates the hover text, e.g. after the hotkey changed.
@@ -91,14 +90,14 @@ impl Tray {
 /// when a menu item is clicked.
 pub fn build(
     status: &str,
-    start_with_windows: bool,
+    start_at_login: bool,
     background: &BackgroundSource,
     on_command: impl Fn(TrayCommand) + Send + Sync + 'static,
 ) -> anyhow::Result<Tray> {
     let mut commands: Vec<(MenuId, TrayCommand)> = Vec::new();
 
-    let autostart = CheckMenuItem::new("Start with Windows", true, start_with_windows, None);
-    commands.push((autostart.id().clone(), TrayCommand::ToggleStartWithWindows));
+    let autostart = CheckMenuItem::new(platform::autostart::LABEL, true, start_at_login, None);
+    commands.push((autostart.id().clone(), TrayCommand::ToggleStartAtLogin));
 
     let browse = MenuItem::new("Browse backgrounds...", true, None);
     let choose = MenuItem::new("Choose your own picture...", true, None);

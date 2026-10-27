@@ -9,7 +9,7 @@ use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
 use crate::hotkey_text::{Os, display};
-use crate::window::WindowHandle;
+use crate::platform::BarWindow;
 
 /// Parses a hotkey such as `"Alt+Space"` or `"Ctrl+Space"`.
 pub fn parse(hotkey: &str) -> anyhow::Result<HotKey> {
@@ -21,7 +21,7 @@ pub fn parse(hotkey: &str) -> anyhow::Result<HotKey> {
 /// What pressing the hotkey does: sets `shown` (so the app resets the bar),
 /// then shows and focuses `window`.
 pub fn on_press(
-    window: WindowHandle,
+    window: BarWindow,
     shown: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> impl Fn() + Send + Sync + 'static {
