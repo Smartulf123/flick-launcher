@@ -51,6 +51,11 @@ tempfile = "3"
 product-name = "Flick"
 identifier = "io.github.smartulf123.flick"
 description = "A fast keyboard launcher: search Google, YouTube and your files"
+long-description = """
+Press a hotkey anywhere and a small search bar appears. Search Google
+and YouTube with suggestions as you type, or your own Desktop,
+Documents and Downloads with fuzzy matching. Lives in the tray, starts
+at login, and sits on a background picture you choose."""
 homepage = "https://github.com/Smartulf123/flick-launcher"
 authors = ["Kasper Aune Dahl"]
 category = "Utility"
