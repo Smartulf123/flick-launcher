@@ -15,7 +15,7 @@ use flick_core::mode::{Action, ResultItem, ResultKind};
 use global_hotkey::GlobalHotKeyManager;
 
 use crate::actions::run_action;
-use crate::gallery::{Gallery, GalleryAction, Pick};
+use crate::gallery::{Gallery, GalleryAction, Pick, Picks};
 use crate::gallery_loader::{Done, Job, Loader};
 use crate::icons::Icon;
 use crate::shell_icons::IconCache;
@@ -84,6 +84,8 @@ pub struct FlickApp {
     wants_bar_menu: bool,
     /// The background gallery, while it is open.
     gallery: Option<Gallery>,
+    /// Background choices in order; only the latest may be applied.
+    picks: Picks,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -119,6 +121,7 @@ impl FlickApp {
             positioned: false,
             wants_bar_menu: false,
             gallery: None,
+            picks: Picks::default(),
         }
     }
 
@@ -170,10 +173,12 @@ impl FlickApp {
             BackgroundChoice::Browse => self.open_gallery(ctx),
             BackgroundChoice::ChooseFile => {
                 if let Some(path) = background::pick_picture(&paths::pictures_dir()) {
+                    self.picks.next();
                     self.use_background(ctx, BackgroundSource::File(path));
                 }
             }
             BackgroundChoice::None => {
+                self.picks.next();
                 self.use_background(ctx, BackgroundSource::None);
             }
         }
@@ -204,7 +209,10 @@ impl FlickApp {
         if self.gallery.is_some() {
             return;
         }
-        self.gallery = Some(Gallery::new(paths::backgrounds_dir()));
+        self.gallery = Some(Gallery::new(
+            paths::backgrounds_dir(),
+            self.services.loader.generations(),
+        ));
         self.launcher.reset();
         self.pending.clear();
         self.height = GALLERY_HEIGHT;
@@ -228,6 +236,8 @@ impl FlickApp {
         if self.gallery.take().is_none() {
             return;
         }
+        // Searches and thumbnails still queued are no longer wanted.
+        self.services.loader.generations().next();
         self.height = START_HEIGHT;
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, START_HEIGHT)));
         if let Some(outer) = ctx.input(|i| i.viewport().outer_rect) {
@@ -242,8 +252,10 @@ impl FlickApp {
     /// A finished search, thumbnail or download from the loader.
     fn handle_loaded(&mut self, ctx: &egui::Context, done: Done) {
         match done {
-            Done::Downloaded { id, result } => {
+            Done::Downloaded { id, pick, result } => {
                 let ok = match result {
+                    // Saved either way; only the latest choice becomes the background.
+                    Ok(_) if !self.picks.is_latest(pick) => true,
                     Ok(path) => self.use_background(ctx, BackgroundSource::File(path)),
                     Err(e) => {
                         log::error!("download of wallhaven {id}: {e:#}");
@@ -310,14 +322,17 @@ impl FlickApp {
             GalleryAction::None => {}
             GalleryAction::Back => self.close_gallery(ctx),
             GalleryAction::Pick(Pick::Source(source)) => {
+                self.picks.next();
                 if !self.use_background(ctx, source) {
                     log::error!("could not open the picked background");
                 }
             }
             GalleryAction::Pick(Pick::Download(wallpaper)) => {
+                let pick = self.picks.next();
                 self.services.loader.send(Job::Download {
                     wallpaper,
                     dir: paths::backgrounds_dir(),
+                    pick,
                 });
             }
             GalleryAction::Jobs(jobs) => {

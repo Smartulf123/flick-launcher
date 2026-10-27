@@ -2,6 +2,7 @@
 //! downloads, so the window never waits on the network.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
@@ -14,8 +15,25 @@ use crate::wallhaven::{self, SearchPage, Wallpaper};
 const WORKERS: usize = 4;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Work for the loader. `generation` lets the gallery ignore results of a
-/// search it has already replaced.
+/// Search numbers, shared by every gallery and the workers. A number is
+/// never reused while Flick runs, so a reply can only match the search it
+/// was made for, and workers skip work for a replaced search.
+#[derive(Clone, Default)]
+pub struct Generations(Arc<AtomicU64>);
+
+impl Generations {
+    /// A new current search number; work for older numbers becomes stale.
+    pub fn next(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn current(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// Work for the loader. `generation` ties searches and thumbnails to one
+/// search; `pick` numbers the user's choices so only the latest one wins.
 pub enum Job {
     Search {
         generation: u64,
@@ -29,6 +47,7 @@ pub enum Job {
     Download {
         wallpaper: Wallpaper,
         dir: PathBuf,
+        pick: u64,
     },
 }
 
@@ -44,6 +63,7 @@ pub enum Done {
     },
     Downloaded {
         id: String,
+        pick: u64,
         result: anyhow::Result<PathBuf>,
     },
 }
@@ -53,6 +73,7 @@ type Fetch = dyn Fn(&str) -> anyhow::Result<Vec<u8>> + Send + Sync;
 pub struct Loader {
     jobs: Mutex<mpsc::Sender<Job>>,
     done: Arc<Mutex<Vec<Done>>>,
+    generations: Generations,
 }
 
 impl Loader {
@@ -72,15 +93,27 @@ impl Loader {
         let done = Arc::new(Mutex::new(Vec::new()));
         let fetch: Arc<Fetch> = Arc::new(fetch);
         let on_update: Arc<dyn Fn() + Send + Sync> = Arc::new(on_update);
+        let generations = Generations::default();
         for _ in 0..WORKERS {
-            let (rx, done, fetch, on_update) =
-                (rx.clone(), done.clone(), fetch.clone(), on_update.clone());
+            let (rx, done, fetch, on_update, generations) = (
+                rx.clone(),
+                done.clone(),
+                fetch.clone(),
+                on_update.clone(),
+                generations.clone(),
+            );
             std::thread::spawn(move || {
                 loop {
                     let job = match rx.lock().unwrap_or_else(|p| p.into_inner()).recv() {
                         Ok(job) => job,
                         Err(_) => break, // the gallery is gone
                     };
+                    // A newer search replaced this one: don't fetch for it.
+                    if let Job::Search { generation, .. } | Job::Thumb { generation, .. } = &job
+                        && *generation != generations.current()
+                    {
+                        continue;
+                    }
                     let result = run(job, fetch.as_ref());
                     done.lock().unwrap_or_else(|p| p.into_inner()).push(result);
                     on_update();
@@ -90,6 +123,7 @@ impl Loader {
         Loader {
             jobs: Mutex::new(tx),
             done,
+            generations,
         }
     }
 
@@ -99,6 +133,11 @@ impl Loader {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .send(job);
+    }
+
+    /// The shared search numbers (give one to each gallery).
+    pub fn generations(&self) -> Generations {
+        self.generations.clone()
     }
 
     /// Results finished since the last call.
@@ -123,9 +162,14 @@ fn run(job: Job, fetch: &Fetch) -> Done {
             id,
             image: fetch(&url).and_then(|bytes| background::decode(&bytes)),
         },
-        Job::Download { wallpaper, dir } => Done::Downloaded {
+        Job::Download {
+            wallpaper,
+            dir,
+            pick,
+        } => Done::Downloaded {
             result: download(&wallpaper, &dir, fetch),
             id: wallpaper.id,
+            pick,
         },
     }
 }
@@ -190,6 +234,8 @@ mod tests {
         let loader = Loader::start_with(fetch, move || {
             let _ = tx.send(());
         });
+        // Search and thumbnail jobs are for the current search.
+        loader.generations().next();
         loader.send(job);
         rx.recv_timeout(Duration::from_secs(5)).unwrap();
         loader.take_done().pop().unwrap()
@@ -201,7 +247,7 @@ mod tests {
         let done = run_one(
             move |_| Ok(bytes.clone()),
             Job::Thumb {
-                generation: 3,
+                generation: 1,
                 id: "a".into(),
                 url: "u".into(),
             },
@@ -212,7 +258,7 @@ mod tests {
                 id,
                 image,
             } => {
-                assert_eq!((generation, id.as_str()), (3, "a"));
+                assert_eq!((generation, id.as_str()), (1, "a"));
                 assert_eq!(image.unwrap().size, [4, 2]);
             }
             _ => panic!("expected a thumbnail"),
@@ -228,13 +274,14 @@ mod tests {
             Job::Download {
                 wallpaper: wallpaper("abc"),
                 dir: dir.path().to_path_buf(),
+                pick: 1,
             },
         );
-        let Done::Downloaded { id, result } = done else {
+        let Done::Downloaded { id, pick, result } = done else {
             panic!("expected a download")
         };
         let path = result.unwrap();
-        assert_eq!(id, "abc");
+        assert_eq!((id.as_str(), pick), ("abc", 1));
         assert_eq!(path, dir.path().join("wallhaven-abc.jpg"));
         assert_eq!(crate::background::load(&path).unwrap().size, [4, 2]);
     }
@@ -247,6 +294,7 @@ mod tests {
             Job::Download {
                 wallpaper: wallpaper("abc"),
                 dir: dir.path().join("backgrounds"),
+                pick: 1,
             },
         );
         let Done::Downloaded { result, .. } = done else {
@@ -269,6 +317,7 @@ mod tests {
             Job::Download {
                 wallpaper: wallpaper("abc"),
                 dir: dir.path().to_path_buf(),
+                pick: 1,
             },
         );
         let Done::Downloaded { result, .. } = done else {
@@ -287,7 +336,8 @@ mod tests {
             let _ = tx.send(());
         });
         let url = wallhaven::search_url("anime", wallhaven::Categories::default(), 1);
-        loader.send(Job::Search { generation: 1, url });
+        let generation = loader.generations().next();
+        loader.send(Job::Search { generation, url });
         rx.recv_timeout(Duration::from_secs(15)).unwrap();
         let Some(Done::Search { result, .. }) = loader.take_done().pop() else {
             panic!("expected a search")
@@ -312,12 +362,47 @@ mod tests {
     }
 
     #[test]
+    fn stale_thumbnail_jobs_are_skipped_without_fetching() {
+        let fetched = Arc::new(Mutex::new(Vec::new()));
+        let seen = fetched.clone();
+        let bytes = png_bytes();
+        let (tx, rx) = mpsc::channel();
+        let loader = Loader::start_with(
+            move |url| {
+                seen.lock().unwrap().push(url.to_owned());
+                Ok(bytes.clone())
+            },
+            move || {
+                let _ = tx.send(());
+            },
+        );
+        let generations = loader.generations();
+        let old = generations.next();
+        let new = generations.next();
+        loader.send(Job::Thumb {
+            generation: old,
+            id: "old".into(),
+            url: "old".into(),
+        });
+        loader.send(Job::Thumb {
+            generation: new,
+            id: "new".into(),
+            url: "new".into(),
+        });
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(*fetched.lock().unwrap(), ["new"]);
+        let done = loader.take_done();
+        assert!(matches!(done.as_slice(), [Done::Thumb { generation, .. }] if *generation == new));
+    }
+
+    #[test]
     fn search_jobs_come_back_parsed() {
         let reply = r#"{"data":[{"id":"x1","url":"p","purity":"sfw","resolution":"1x1","path":"f","thumbs":{"small":"t"}}],"meta":{"current_page":1,"last_page":2}}"#;
         let done = run_one(
             move |_| Ok(reply.as_bytes().to_vec()),
             Job::Search {
-                generation: 7,
+                generation: 1,
                 url: "u".into(),
             },
         );
@@ -327,7 +412,7 @@ mod tests {
         let page = result.unwrap();
         assert_eq!(
             (generation, page.wallpapers.len(), page.last_page),
-            (7, 1, 2)
+            (1, 1, 2)
         );
     }
 }

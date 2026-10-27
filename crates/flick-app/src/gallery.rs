@@ -9,7 +9,7 @@ use flick_core::config::BackgroundSource;
 
 use crate::background;
 use crate::builtin_backgrounds::{BUILTINS, Builtin};
-use crate::gallery_loader::{Done, Job};
+use crate::gallery_loader::{Done, Generations, Job};
 use crate::theme::Palette;
 use crate::wallhaven::{self, Categories, Wallpaper};
 
@@ -40,7 +40,24 @@ pub enum GalleryAction {
     Jobs(Vec<Job>),
 }
 
+/// Numbers the user's background choices so a slow download never
+/// replaces something chosen after it.
+#[derive(Default)]
+pub struct Picks(u64);
+
+impl Picks {
+    pub fn next(&mut self) -> u64 {
+        self.0 += 1;
+        self.0
+    }
+
+    pub fn is_latest(&self, pick: u64) -> bool {
+        pick == self.0
+    }
+}
+
 pub struct Gallery {
+    generations: Generations,
     tab: Tab,
     query: String,
     categories: Categories,
@@ -58,8 +75,9 @@ pub struct Gallery {
 }
 
 impl Gallery {
-    pub fn new(downloads_dir: PathBuf) -> Self {
+    pub fn new(downloads_dir: PathBuf, generations: Generations) -> Self {
         Self {
+            generations,
             tab: Tab::Builtin,
             query: String::new(),
             categories: Categories::default(),
@@ -95,7 +113,7 @@ impl Gallery {
     /// A fresh search for the current text and categories; older replies
     /// still on their way will be ignored.
     pub fn start_search(&mut self) -> Job {
-        self.generation += 1;
+        self.generation = self.generations.next();
         self.results.clear();
         self.online_thumbs.clear();
         self.page = 0;
@@ -482,7 +500,7 @@ pub fn list_downloaded(dir: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gallery_loader::Done;
+    use crate::gallery_loader::{Done, Generations};
     use crate::wallhaven::SearchPage;
 
     fn ctx() -> egui::Context {
@@ -516,7 +534,7 @@ mod tests {
 
     #[test]
     fn new_search_ignores_late_results_from_the_old_one() {
-        let mut g = Gallery::new(tmp());
+        let mut g = Gallery::new(tmp(), Generations::default());
         g.start_search();
         g.start_search(); // generation 2
         g.apply(
@@ -542,8 +560,40 @@ mod tests {
     }
 
     #[test]
+    fn reopened_gallery_ignores_replies_from_the_closed_one() {
+        let generations = Generations::default();
+        let mut first = Gallery::new(tmp(), generations.clone());
+        let Job::Search {
+            generation: old, ..
+        } = first.start_search()
+        else {
+            panic!("expected a search")
+        };
+        drop(first);
+        let mut second = Gallery::new(tmp(), generations);
+        second.start_search();
+        second.apply(
+            &ctx(),
+            Done::Search {
+                generation: old,
+                result: Ok(page(&["stale"], 1, 1)),
+            },
+        );
+        assert!(second.results().is_empty());
+    }
+
+    #[test]
+    fn an_older_download_does_not_replace_a_newer_pick() {
+        let mut picks = Picks::default();
+        let slow_download = picks.next();
+        let builtin_click = picks.next();
+        assert!(!picks.is_latest(slow_download));
+        assert!(picks.is_latest(builtin_click));
+    }
+
+    #[test]
     fn offline_shows_cant_reach_and_stops_loading() {
-        let mut g = Gallery::new(tmp());
+        let mut g = Gallery::new(tmp(), Generations::default());
         g.start_search();
         g.apply(
             &ctx(),
@@ -558,7 +608,7 @@ mod tests {
 
     #[test]
     fn load_more_asks_for_the_next_page_and_appends() {
-        let mut g = Gallery::new(tmp());
+        let mut g = Gallery::new(tmp(), Generations::default());
         g.start_search();
         g.apply(
             &ctx(),
@@ -587,7 +637,7 @@ mod tests {
 
     #[test]
     fn no_more_pages_after_the_last() {
-        let mut g = Gallery::new(tmp());
+        let mut g = Gallery::new(tmp(), Generations::default());
         g.start_search();
         g.apply(
             &ctx(),
