@@ -73,8 +73,6 @@ pub struct FlickApp {
     was_focused: bool,
     /// Whether the window has been moved to its opening spot yet.
     positioned: bool,
-    /// The selected row last drawn, to scroll a newly selected row into view.
-    shown_selection: Option<usize>,
     /// The search box was right-clicked; open the Theme and Background menu.
     wants_bar_menu: bool,
 }
@@ -110,7 +108,6 @@ impl FlickApp {
             height: START_HEIGHT,
             was_focused: false,
             positioned: false,
-            shown_selection: None,
             wants_bar_menu: false,
         }
     }
@@ -275,30 +272,16 @@ impl FlickApp {
                 // Moving the mouse over a row selects it; a resting pointer does
                 // not fight the arrow keys.
                 let pointer_moved = ui.input(|i| i.pointer.is_moving());
-                // The list scrolls instead of pushing the window off the screen.
-                let max_height = ui.input(|i| {
-                    let monitor = i.viewport().monitor_size.map_or(f32::INFINITY, |m| m.y);
-                    let top = i.viewport().outer_rect.map_or(0.0, |r| r.top());
-                    placement::list_max_height(monitor, top)
-                });
-                let scroll_to_selected = self.shown_selection != Some(selected);
-                self.shown_selection = Some(selected);
-                egui::ScrollArea::vertical()
-                    .max_height(max_height)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for (i, item) in self.launcher.results().iter().enumerate() {
-                            let response = result_row(ui, p, &mut self.icons, item, i == selected);
-                            if i == selected && scroll_to_selected {
-                                response.scroll_to_me(None);
-                            }
-                            if response.clicked() {
-                                clicked_row = Some(i);
-                            } else if pointer_moved && response.hovered() && i != selected {
-                                hovered_row = Some(i);
-                            }
-                        }
-                    });
+                // All results (at most max_results) are shown; the window
+                // slides up if needed rather than the list scrolling.
+                for (i, item) in self.launcher.results().iter().enumerate() {
+                    let response = result_row(ui, p, &mut self.icons, item, i == selected);
+                    if response.clicked() {
+                        clicked_row = Some(i);
+                    } else if pointer_moved && response.hovered() && i != selected {
+                        hovered_row = Some(i);
+                    }
+                }
             });
         }
 
@@ -316,11 +299,23 @@ impl FlickApp {
     }
 
     /// Resizes the window to the height the content actually used.
+    /// Resizes the window to the height the content actually used, sliding
+    /// it up if the new height would run past the bottom of the screen.
     fn fit_height(&mut self, ctx: &egui::Context, content_height: f32) {
         let height = content_height.ceil();
-        if (height - self.height).abs() >= 1.0 {
-            self.height = height;
-            ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, height)));
+        if (height - self.height).abs() < 1.0 {
+            return;
+        }
+        self.height = height;
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, height)));
+        let (outer, monitor) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size));
+        if let (Some(outer), Some(monitor)) = (outer, monitor)
+            && let Some(top) = placement::keep_on_screen(outer.top(), height, monitor.y)
+        {
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(
+                outer.left(),
+                top,
+            )));
         }
     }
 }
@@ -477,7 +472,6 @@ impl eframe::App for FlickApp {
             // Every show starts empty, whatever happened before the last hide.
             self.launcher.reset();
             self.pending.clear();
-            self.shown_selection = None;
         }
         if self.services.results_changed.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();

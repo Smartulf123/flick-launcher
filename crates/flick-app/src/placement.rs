@@ -1,16 +1,12 @@
-//! Where the window opens and how tall the result list may get, so the
-//! bar never runs off the bottom of the screen.
+//! Where the window opens, and keeping it on the screen as the result list
+//! grows: the window slides up rather than the list scrolling.
 
 use eframe::egui::{Pos2, Vec2, pos2};
 
 /// How far down the screen the window opens, like Spotlight and look.
 const TOP_FRACTION: f32 = 0.22;
 /// Space kept free under the window.
-const BOTTOM_MARGIN: f32 = 24.0;
-/// Height of everything except the list: search card, gaps, hint line.
-const OVERHEAD: f32 = 170.0;
-/// The list never gets shorter than this (about three rows); it scrolls.
-pub const MIN_LIST_HEIGHT: f32 = 140.0;
+const BOTTOM_MARGIN: f32 = 16.0;
 
 /// Top-left corner for a window `width` wide on a `monitor`-sized screen.
 pub fn initial_position(monitor: Vec2, width: f32) -> Pos2 {
@@ -20,9 +16,12 @@ pub fn initial_position(monitor: Vec2, width: f32) -> Pos2 {
     )
 }
 
-/// The tallest the result list may be with the window's top at `window_top`.
-pub fn list_max_height(monitor_height: f32, window_top: f32) -> f32 {
-    (monitor_height - window_top - BOTTOM_MARGIN - OVERHEAD).max(MIN_LIST_HEIGHT)
+/// The new top edge if a window at `top` that is `height` tall would run
+/// past the bottom of a `monitor_height` screen; `None` if it already fits.
+/// Never moves the window above the top of the screen.
+pub fn keep_on_screen(top: f32, height: f32, monitor_height: f32) -> Option<f32> {
+    let bottom_limit = monitor_height - BOTTOM_MARGIN;
+    (top + height > bottom_limit).then(|| (bottom_limit - height).max(0.0).round())
 }
 
 #[cfg(test)]
@@ -43,14 +42,18 @@ mod tests {
     }
 
     #[test]
-    fn list_gets_the_room_below_the_window() {
-        // 1080 high, window top at 238: 1080 - 238 - 24 margin - 170 for the rest.
-        assert_eq!(list_max_height(1080.0, 238.0), 648.0);
-        assert_eq!(list_max_height(720.0, 158.0), 368.0);
+    fn a_window_that_fits_stays_put() {
+        assert_eq!(keep_on_screen(158.0, 500.0, 720.0), None);
     }
 
     #[test]
-    fn list_keeps_a_few_rows_when_dragged_low() {
-        assert_eq!(list_max_height(720.0, 650.0), MIN_LIST_HEIGHT);
+    fn a_window_that_runs_off_the_bottom_slides_up() {
+        // 158 + 620 = 778 > 720 - 16: move the top to 720 - 16 - 620 = 84.
+        assert_eq!(keep_on_screen(158.0, 620.0, 720.0), Some(84.0));
+    }
+
+    #[test]
+    fn never_above_the_top_of_the_screen() {
+        assert_eq!(keep_on_screen(300.0, 900.0, 720.0), Some(0.0));
     }
 }
