@@ -4,6 +4,8 @@
 
 use std::path::Path;
 
+use super::SystemShortcut;
+
 /// GNOME's keyboard-shortcut settings.
 pub const SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 /// Flick's own custom shortcut in those settings.
@@ -19,6 +21,24 @@ pub enum Session {
     Wayland { gnome: bool },
 }
 
+/// Who catches the hotkey: GNOME always gets Flick's shortcut (in X11
+/// sessions too, so a shortcut left from a Wayland session never fights
+/// Flick's own grab); other Wayland desktops need one bound by hand.
+pub fn shortcut_for(var: impl Fn(&str) -> Option<String>) -> Option<SystemShortcut> {
+    if is_gnome(&var) {
+        return Some(SystemShortcut::Gnome);
+    }
+    match detect(&var) {
+        Session::Wayland { .. } => Some(SystemShortcut::Manual),
+        Session::X11 => None,
+    }
+}
+
+fn is_gnome(var: impl Fn(&str) -> Option<String>) -> bool {
+    var("XDG_CURRENT_DESKTOP")
+        .is_some_and(|desktops| desktops.split(':').any(|d| d.eq_ignore_ascii_case("gnome")))
+}
+
 /// Reads the session from environment variables (`var` returns one).
 pub fn detect(var: impl Fn(&str) -> Option<String>) -> Session {
     let wayland = var("XDG_SESSION_TYPE").is_some_and(|t| t.eq_ignore_ascii_case("wayland"))
@@ -26,9 +46,9 @@ pub fn detect(var: impl Fn(&str) -> Option<String>) -> Session {
     if !wayland {
         return Session::X11;
     }
-    let gnome = var("XDG_CURRENT_DESKTOP")
-        .is_some_and(|desktops| desktops.split(':').any(|d| d.eq_ignore_ascii_case("gnome")));
-    Session::Wayland { gnome }
+    Session::Wayland {
+        gnome: is_gnome(var),
+    }
 }
 
 /// A hotkey from the settings ("Ctrl+Alt+Space") as GNOME writes it
@@ -192,6 +212,34 @@ mod tests {
             ("XDG_CURRENT_DESKTOP", "KDE"),
         ];
         assert_eq!(detect(env(&kde)), Session::Wayland { gnome: false });
+    }
+
+    #[test]
+    fn gnome_always_gets_its_shortcut_other_wayland_desktops_bind_by_hand() {
+        use crate::platform::SystemShortcut;
+        let gnome_x11 = [
+            ("XDG_SESSION_TYPE", "x11"),
+            ("XDG_CURRENT_DESKTOP", "ubuntu:GNOME"),
+        ];
+        assert_eq!(shortcut_for(env(&gnome_x11)), Some(SystemShortcut::Gnome));
+        let gnome_wayland = [
+            ("XDG_SESSION_TYPE", "wayland"),
+            ("XDG_CURRENT_DESKTOP", "GNOME"),
+        ];
+        assert_eq!(
+            shortcut_for(env(&gnome_wayland)),
+            Some(SystemShortcut::Gnome)
+        );
+        let kde_wayland = [
+            ("XDG_SESSION_TYPE", "wayland"),
+            ("XDG_CURRENT_DESKTOP", "KDE"),
+        ];
+        assert_eq!(
+            shortcut_for(env(&kde_wayland)),
+            Some(SystemShortcut::Manual)
+        );
+        let kde_x11 = [("XDG_SESSION_TYPE", "x11"), ("XDG_CURRENT_DESKTOP", "KDE")];
+        assert_eq!(shortcut_for(env(&kde_x11)), None);
     }
 
     #[test]

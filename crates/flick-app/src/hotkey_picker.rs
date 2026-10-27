@@ -4,6 +4,18 @@
 use eframe::egui::{Key, Modifiers};
 
 use crate::hotkey_text::{Os, combo_text, hint};
+use crate::platform::SystemShortcut;
+
+/// The note beside the keys: how to finish. Where the person binds the
+/// key themselves, saving alone changes nothing, so it says so.
+pub fn note(shortcut: Option<SystemShortcut>) -> &'static str {
+    match shortcut {
+        Some(SystemShortcut::Manual) => {
+            "Enter, then bind flick --toggle to it in your system settings"
+        }
+        _ => "Enter to save \u{b7} Esc to cancel",
+    }
+}
 
 /// The combination picked so far, and what to tell the person.
 #[derive(Debug, Default)]
@@ -56,6 +68,20 @@ mod tests {
 
     fn press(c: &mut Capture, key: Key, modifiers: Modifiers) -> Step {
         c.key(key, modifiers, Os::Windows)
+    }
+
+    #[test]
+    fn the_note_says_how_to_finish() {
+        use crate::platform::SystemShortcut;
+        assert_eq!(note(None), "Enter to save \u{b7} Esc to cancel");
+        assert_eq!(
+            note(Some(SystemShortcut::Gnome)),
+            "Enter to save \u{b7} Esc to cancel"
+        );
+        assert_eq!(
+            note(Some(SystemShortcut::Manual)),
+            "Enter, then bind flick --toggle to it in your system settings"
+        );
     }
 
     #[test]

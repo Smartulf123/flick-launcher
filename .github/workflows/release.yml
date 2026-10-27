@@ -6,14 +6,28 @@ on:
   push:
     tags: ["v*"]
 
+# Only the publish job may write to the repository.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The tag must name the version in Cargo.toml (v0.2.0, or v0.2.0-rc.1
+  # for a pre-release of it), so the files inside match their names.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          tag_version="${GITHUB_REF_NAME#v}"
+          echo "Cargo.toml: $cargo_version, tag: $tag_version"
+          test "${tag_version%%-*}" = "$cargo_version"
+
   windows:
+    needs: check
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +42,7 @@ jobs:
           path: Flick-windows-x64.exe
 
   macos:
+    needs: check
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +58,7 @@ jobs:
           lipo -create -output target/release/flick \
             target/aarch64-apple-darwin/release/flick \
             target/x86_64-apple-darwin/release/flick
-      - run: cargo install cargo-packager --locked
+      - run: cargo install cargo-packager --version 0.11.8 --locked
       - name: Package Flick.app into a .dmg
         run: |
           cargo packager --release -p flick-app --formats dmg
@@ -54,6 +69,7 @@ jobs:
           path: Flick-macos.dmg
 
   linux:
+    needs: check
     runs-on: ubuntu-22.04
     env:
       # The AppImage tools are AppImages themselves; the runner has no FUSE.
@@ -64,7 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libx11-dev libxkbcommon-dev libgl1-mesa-dev
       - run: cargo build --release -p flick-app
-      - run: cargo install cargo-packager --locked
+      - run: cargo install cargo-packager --version 0.11.8 --locked
       - name: Package a .deb and an AppImage
         run: |
           cargo packager --release -p flick-app --formats deb,appimage
@@ -81,6 +97,8 @@ jobs:
   publish:
     needs: [windows, macos, linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

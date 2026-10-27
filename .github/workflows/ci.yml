@@ -4,7 +4,9 @@ name: CI
 # and Ubuntu. Pushes also build preview programs for macOS and Linux that
 # testers can download from the run's page.
 on:
+  # Branches only: version tags are built by release.yml.
   push:
+    branches: ["**"]
   pull_request:
 
 env:

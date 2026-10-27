@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use crate::platform::unix_autostart::{Entry, self_command};
+use crate::platform::unix_autostart::{Entry, is_temporary_location, self_command};
 
 /// The tray menu's name for this setting.
 pub const LABEL: &str = if cfg!(target_os = "macos") {
@@ -49,6 +49,13 @@ pub fn sync(first_run: bool) {
     let (Some(entry), Some(program)) = (entry(), program()) else {
         return;
     };
+    if is_temporary_location(&program) {
+        log::info!(
+            "{LABEL}: not set from {}, which is temporary",
+            program.display()
+        );
+        return;
+    }
     let result = if first_run {
         log::info!("first run: {LABEL} from {}", program.display());
         entry.enable(&program)
@@ -75,6 +82,10 @@ pub fn toggle() {
     } else {
         log::info!("{LABEL}: on");
         match program() {
+            Some(program) if is_temporary_location(&program) => {
+                log::warn!("{LABEL}: move Flick to Applications first");
+                Ok(())
+            }
             Some(program) => entry.enable(&program),
             None => Ok(()),
         }

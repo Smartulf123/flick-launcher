@@ -66,6 +66,14 @@ pub fn launch_agent_plist(exe: &Path) -> String {
     )
 }
 
+/// A copy that will not be there at the next login: run straight from a
+/// mounted disk image, or from the quarantine copy macOS makes of an app
+/// that was not moved to Applications.
+pub fn is_temporary_location(program: &Path) -> bool {
+    let path = program.to_string_lossy();
+    path.starts_with("/Volumes/") || path.contains("/AppTranslocation/")
+}
+
 /// A start-at-login file and how to write it.
 pub struct Entry {
     pub file: PathBuf,
@@ -152,6 +160,20 @@ mod tests {
             plist.contains("<key>RunAtLoad</key>\n    <true/>"),
             "{plist}"
         );
+    }
+
+    #[test]
+    fn copies_run_from_a_disk_image_or_quarantine_are_temporary() {
+        assert!(is_temporary_location(Path::new(
+            "/Volumes/Flick/Flick.app/Contents/MacOS/flick"
+        )));
+        assert!(is_temporary_location(Path::new(
+            "/private/var/folders/x/AppTranslocation/ABC/d/Flick.app/Contents/MacOS/flick"
+        )));
+        assert!(!is_temporary_location(Path::new(
+            "/Applications/Flick.app/Contents/MacOS/flick"
+        )));
+        assert!(!is_temporary_location(Path::new("/usr/bin/flick")));
     }
 
     #[test]

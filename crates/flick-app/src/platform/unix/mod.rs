@@ -28,18 +28,11 @@ pub fn with_tray_icon(
     builder.with_icon(icon)
 }
 
-/// Linux on Wayland: GNOME gets a shortcut from Flick, other desktops one
-/// from the person. macOS and X11 let Flick grab the key itself.
+/// Linux: GNOME gets a shortcut from Flick, other Wayland desktops one from
+/// the person. macOS and other X11 desktops let Flick grab the key itself.
 pub fn system_shortcut() -> Option<super::SystemShortcut> {
     #[cfg(target_os = "linux")]
-    {
-        use super::gnome::{Session, detect};
-        match detect(|name| std::env::var(name).ok()) {
-            Session::X11 => None,
-            Session::Wayland { gnome: true } => Some(super::SystemShortcut::Gnome),
-            Session::Wayland { gnome: false } => Some(super::SystemShortcut::Manual),
-        }
-    }
+    return super::gnome::shortcut_for(|name| std::env::var(name).ok());
     #[cfg(not(target_os = "linux"))]
     None
 }

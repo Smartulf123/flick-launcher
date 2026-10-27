@@ -578,7 +578,14 @@ impl FlickApp {
             .error
             .as_deref()
             .or(capture.message)
-            .unwrap_or("Enter to save \u{b7} Esc to cancel");
+            .unwrap_or_else(|| {
+                crate::hotkey_picker::note(
+                    self.services
+                        .hotkey
+                        .as_ref()
+                        .and_then(Hotkeys::system_shortcut),
+                )
+            });
         let card = self.card();
         let content = egui::Frame::NONE
             .inner_margin(egui::Margin::same(GAP))
@@ -890,13 +897,14 @@ impl eframe::App for FlickApp {
                 .unwrap_or_else(|e| e.into_inner()),
         );
         for message in messages {
-            match message {
-                Message::Toggle if self.visible => self.hide(),
+            match message_action(message, self.visible, self.capture.is_some()) {
+                Some(BarAction::Hide) => self.hide(),
                 // Shown like the hotkey shows it, reset below.
-                Message::Toggle | Message::Show => {
+                Some(BarAction::Show) => {
                     self.services.shown.store(true, Ordering::Relaxed);
                     self.services.window.show_and_focus();
                 }
+                None => {}
             }
         }
         if self.services.shown.swap(false, Ordering::Relaxed) {
@@ -998,6 +1006,25 @@ impl eframe::App for FlickApp {
     }
 }
 
+/// What a message from a second `flick` does to the bar.
+#[derive(Debug, PartialEq, Eq)]
+enum BarAction {
+    Show,
+    Hide,
+}
+
+/// `None` while a new hotkey is being picked: the old one is paused
+/// there, and on GNOME Wayland pressing it runs `flick --toggle`.
+fn message_action(message: Message, visible: bool, capturing: bool) -> Option<BarAction> {
+    if capturing {
+        return None;
+    }
+    match message {
+        Message::Toggle if visible => Some(BarAction::Hide),
+        Message::Toggle | Message::Show => Some(BarAction::Show),
+    }
+}
+
 /// Every key pressed this frame, with its modifiers; typed text is dropped
 /// too, so nothing reaches the search box underneath.
 fn take_key_presses(ctx: &egui::Context) -> Vec<(Key, Modifiers)> {
@@ -1079,6 +1106,29 @@ fn intent_for(key: Key, modifiers: Modifiers) -> Option<Intent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn messages_show_and_hide_the_bar() {
+        assert_eq!(
+            message_action(Message::Toggle, true, false),
+            Some(BarAction::Hide)
+        );
+        assert_eq!(
+            message_action(Message::Toggle, false, false),
+            Some(BarAction::Show)
+        );
+        assert_eq!(
+            message_action(Message::Show, true, false),
+            Some(BarAction::Show)
+        );
+    }
+
+    #[test]
+    fn picking_a_hotkey_is_not_interrupted_by_the_old_one() {
+        // On GNOME Wayland the old hotkey runs `flick --toggle`.
+        assert_eq!(message_action(Message::Toggle, true, true), None);
+        assert_eq!(message_action(Message::Show, true, true), None);
+    }
     use eframe::egui::{self, Event, Key, Modifiers, RawInput};
 
     fn press(key: Key, modifiers: Modifiers) -> Event {
