@@ -9,7 +9,7 @@ use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
 use crate::hotkey_text::{Os, display};
-use crate::platform::BarWindow;
+use crate::platform::{self, BarWindow, SystemShortcut};
 
 /// Parses a hotkey such as `"Alt+Space"` or `"Ctrl+Space"`.
 pub fn parse(hotkey: &str) -> anyhow::Result<HotKey> {
@@ -37,13 +37,24 @@ pub fn on_press(
 /// Must be created on the event-loop thread (the eframe creation closure)
 /// and kept alive for the hotkey to stay registered.
 pub struct Hotkeys {
-    manager: GlobalHotKeyManager,
+    backend: Backend,
     current: Option<(HotKey, String)>,
 }
 
+enum Backend {
+    /// Flick grabs the key itself (Windows, macOS, Linux on X11).
+    Global(GlobalHotKeyManager),
+    /// Linux on Wayland: the desktop runs `flick --toggle` on the key.
+    System(SystemShortcut),
+}
+
 impl Hotkeys {
-    /// Starts with no hotkey registered; `change` registers one.
+    /// Starts with no hotkey registered; `change` registers one. Where
+    /// apps cannot grab keys, the desktop's own shortcut is used instead.
     pub fn new(on_press: impl Fn() + Send + Sync + 'static) -> anyhow::Result<Self> {
+        if let Some(shortcut) = platform::system_shortcut() {
+            return Ok(Self::system(shortcut));
+        }
         let manager = GlobalHotKeyManager::new().context("could not start the hotkey manager")?;
         GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
             if event.state == HotKeyState::Pressed {
@@ -51,9 +62,25 @@ impl Hotkeys {
             }
         }));
         Ok(Self {
-            manager,
+            backend: Backend::Global(manager),
             current: None,
         })
+    }
+
+    /// Hotkeys handled by the desktop's shortcut settings.
+    pub fn system(shortcut: SystemShortcut) -> Self {
+        Self {
+            backend: Backend::System(shortcut),
+            current: None,
+        }
+    }
+
+    /// `Some` when the desktop, not Flick, catches the key.
+    pub fn system_shortcut(&self) -> Option<SystemShortcut> {
+        match self.backend {
+            Backend::Global(_) => None,
+            Backend::System(shortcut) => Some(shortcut),
+        }
     }
 
     /// Switches to `text`. The new hotkey is registered before the old one
@@ -63,15 +90,21 @@ impl Hotkeys {
         if self.current.as_ref().is_some_and(|(old, _)| *old == hotkey) {
             return Ok(());
         }
-        self.manager.register(hotkey).with_context(|| {
-            format!(
-                "{} is already used by another program",
-                display(text, Os::CURRENT)
-            )
-        })?;
-        if let Some((old, _)) = self.current.replace((hotkey, text.to_owned())) {
-            let _ = self.manager.unregister(old);
+        match &self.backend {
+            Backend::Global(manager) => {
+                manager.register(hotkey).with_context(|| {
+                    format!(
+                        "{} is already used by another program",
+                        display(text, Os::CURRENT)
+                    )
+                })?;
+                if let Some((old, _)) = &self.current {
+                    let _ = manager.unregister(*old);
+                }
+            }
+            Backend::System(shortcut) => platform::apply_system_shortcut(*shortcut, text)?,
         }
+        self.current = Some((hotkey, text.to_owned()));
         Ok(())
     }
 
@@ -82,14 +115,14 @@ impl Hotkeys {
 
     /// Stops the hotkey firing while a new one is being picked.
     pub fn pause(&self) {
-        if let Some((hotkey, _)) = &self.current {
-            let _ = self.manager.unregister(*hotkey);
+        if let (Backend::Global(manager), Some((hotkey, _))) = (&self.backend, &self.current) {
+            let _ = manager.unregister(*hotkey);
         }
     }
 
     pub fn resume(&self) {
-        if let Some((hotkey, _)) = &self.current {
-            match self.manager.register(*hotkey) {
+        if let (Backend::Global(manager), Some((hotkey, _))) = (&self.backend, &self.current) {
+            match manager.register(*hotkey) {
                 Ok(()) | Err(global_hotkey::Error::AlreadyRegistered(_)) => {}
                 Err(e) => log::error!("could not restore the hotkey: {e}"),
             }
@@ -112,6 +145,19 @@ mod tests {
             parse("Ctrl+Space").unwrap(),
             HotKey::new(Some(Modifiers::CONTROL), Code::Space)
         );
+    }
+
+    #[test]
+    fn a_manual_system_shortcut_only_remembers_the_hotkey() {
+        // Wayland outside GNOME: the person binds `flick --toggle` themselves.
+        let mut hotkeys = Hotkeys::system(SystemShortcut::Manual);
+        hotkeys.change("Ctrl+Alt+K").unwrap();
+        assert!(hotkeys.change("Banana+Space").is_err());
+        assert_eq!(hotkeys.current(), Some("Ctrl+Alt+K"));
+        assert_eq!(hotkeys.system_shortcut(), Some(SystemShortcut::Manual));
+        // Pausing has nothing to pause.
+        hotkeys.pause();
+        hotkeys.resume();
     }
 
     /// Registers real system hotkeys, so it needs a desktop session; the

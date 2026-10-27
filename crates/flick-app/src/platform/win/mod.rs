@@ -19,5 +19,15 @@ pub fn with_tray_icon(
     builder.with_icon(icon)
 }
 
+/// Windows always lets Flick grab its hotkey.
+pub fn system_shortcut() -> Option<super::SystemShortcut> {
+    None
+}
+
+/// Never needed on Windows; nothing to do.
+pub fn apply_system_shortcut(_shortcut: super::SystemShortcut, _text: &str) -> anyhow::Result<()> {
+    Ok(())
+}
+
 /// Nothing to change on Windows.
 pub fn configure(_options: &mut eframe::NativeOptions) {}

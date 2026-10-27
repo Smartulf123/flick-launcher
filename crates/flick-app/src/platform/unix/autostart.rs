@@ -35,7 +35,7 @@ fn entry() -> Option<Entry> {
 }
 
 /// This program, as the system should start it.
-fn program() -> Option<PathBuf> {
+pub fn program() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     Some(self_command(
         std::env::var("APPIMAGE").ok().as_deref(),

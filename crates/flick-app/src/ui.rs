@@ -211,7 +211,12 @@ impl FlickApp {
                 self.settings.config.hotkey = text.clone();
                 self.save_settings();
                 if let Some(tray) = &self.services.tray {
-                    tray.set_tooltip(&tray::tooltip(&text, None));
+                    let shortcut = self
+                        .services
+                        .hotkey
+                        .as_ref()
+                        .and_then(Hotkeys::system_shortcut);
+                    tray.set_tooltip(&tray::status(&text, None, shortcut));
                 }
                 self.close_capture();
             }

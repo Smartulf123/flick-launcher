@@ -216,7 +216,14 @@ fn main() -> eframe::Result {
             let tray = {
                 let (queue, ctx) = (tray_queue.clone(), ctx.clone());
                 tray::build(
-                    &tray::tooltip(&config.hotkey, hotkey_error.as_deref()),
+                    &tray::status(
+                        &config.hotkey,
+                        hotkey_error.as_deref(),
+                        hotkeys
+                            .as_ref()
+                            .ok()
+                            .and_then(hotkey::Hotkeys::system_shortcut),
+                    ),
                     platform::autostart::is_enabled(),
                     &background_source,
                     move |command| {

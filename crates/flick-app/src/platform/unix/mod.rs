@@ -28,6 +28,39 @@ pub fn with_tray_icon(
     builder.with_icon(icon)
 }
 
+/// Linux on Wayland: GNOME gets a shortcut from Flick, other desktops one
+/// from the person. macOS and X11 let Flick grab the key itself.
+pub fn system_shortcut() -> Option<super::SystemShortcut> {
+    #[cfg(target_os = "linux")]
+    {
+        use super::gnome::{Session, detect};
+        match detect(|name| std::env::var(name).ok()) {
+            Session::X11 => None,
+            Session::Wayland { gnome: true } => Some(super::SystemShortcut::Gnome),
+            Session::Wayland { gnome: false } => Some(super::SystemShortcut::Manual),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
+/// Points the desktop's shortcut at `flick --toggle` for the hotkey `text`.
+pub fn apply_system_shortcut(shortcut: super::SystemShortcut, text: &str) -> anyhow::Result<()> {
+    match shortcut {
+        #[cfg(target_os = "linux")]
+        super::SystemShortcut::Gnome => {
+            let program = autostart::program()
+                .ok_or_else(|| anyhow::anyhow!("cannot find Flick's own path"))?;
+            super::gnome::apply(text, &program)
+        }
+        // Nothing Flick can write; the tray tip explains it.
+        _ => {
+            let _ = text;
+            Ok(())
+        }
+    }
+}
+
 /// macOS: Flick is a menu-bar app, with no Dock icon or app menu.
 pub fn configure(options: &mut eframe::NativeOptions) {
     #[cfg(target_os = "macos")]

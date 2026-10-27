@@ -34,6 +34,22 @@ pub enum TrayCommand {
     Quit,
 }
 
+/// Tooltip where the person binds the key themselves (Wayland, not GNOME).
+pub const MANUAL_SHORTCUT_TIP: &str = "Flick: bind flick --toggle to a key in your system settings";
+
+/// The tooltip for this system: how to set up the key where the person
+/// binds it themselves, else the hotkey or why it is not working.
+pub fn status(
+    hotkey: &str,
+    hotkey_error: Option<&str>,
+    shortcut: Option<crate::platform::SystemShortcut>,
+) -> String {
+    match shortcut {
+        Some(crate::platform::SystemShortcut::Manual) => MANUAL_SHORTCUT_TIP.to_owned(),
+        _ => tooltip(hotkey, hotkey_error),
+    }
+}
+
 /// Tooltip text: the hotkey, or why it is not working.
 pub fn tooltip(hotkey: &str, hotkey_error: Option<&str>) -> String {
     match hotkey_error {
@@ -178,6 +194,20 @@ mod tests {
             tooltip("Super+Space", Some("already used")),
             "Flick: hotkey Super+Space unavailable, see log"
         );
+    }
+
+    #[test]
+    fn status_explains_binding_the_key_by_hand() {
+        use crate::platform::SystemShortcut;
+        assert_eq!(
+            status("Ctrl+Alt+Space", None, Some(SystemShortcut::Manual)),
+            MANUAL_SHORTCUT_TIP
+        );
+        assert_eq!(
+            status("Ctrl+Alt+Space", None, Some(SystemShortcut::Gnome)),
+            "Flick (Ctrl+Alt+Space)"
+        );
+        assert_eq!(status("Alt+Space", None, None), "Flick (Alt+Space)");
     }
 
     #[test]
