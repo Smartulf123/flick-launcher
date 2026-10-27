@@ -8,6 +8,7 @@ mod icons;
 mod paths;
 mod shell_icons;
 mod single_instance;
+mod suggest_fetch;
 mod theme;
 mod tray;
 mod ui;
@@ -15,14 +16,15 @@ mod window;
 
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
 use flick_core::config::{self, BackgroundSource, Config};
 use flick_core::index::{self, SharedIndex};
 use flick_core::launcher::Launcher;
+use flick_core::modes::suggest::{SuggestionCache, Suggestions};
 
 /// Starts index rebuilds and tells the UI when one finishes.
 #[derive(Clone)]
@@ -97,13 +99,35 @@ fn main() -> eframe::Result {
     }
     autostart::sync(first_run);
 
+    // "Results may have changed" (index rebuilt, suggestions arrived). The
+    // window's context is filled in once it exists, so background threads
+    // can wake it.
+    let results_changed = Arc::new(AtomicBool::new(false));
+    let wake: Arc<OnceLock<egui::Context>> = Arc::default();
+    let notify = {
+        let (flag, wake) = (results_changed.clone(), wake.clone());
+        move || {
+            flag.store(true, Ordering::Relaxed);
+            if let Some(ctx) = wake.get() {
+                ctx.request_repaint();
+            }
+        }
+    };
+
+    let suggestion_cache = SuggestionCache::default();
+    let suggestions = Suggestions {
+        cache: suggestion_cache.clone(),
+        source: suggest_fetch::start(suggestion_cache, notify.clone()),
+    };
+
     let shared = SharedIndex::default();
-    let (registry, default_mode) = config::build_registry(&config, shared.clone())
-        .or_else(|e| {
-            log::error!("bad keywords in config, using defaults: {e}");
-            config::build_registry(&Config::default(), shared.clone())
-        })
-        .expect("default keywords are valid");
+    let (registry, default_mode) =
+        config::build_registry_with(&config, shared.clone(), Some(suggestions.clone()))
+            .or_else(|e| {
+                log::error!("bad keywords in config, using defaults: {e}");
+                config::build_registry_with(&Config::default(), shared.clone(), Some(suggestions))
+            })
+            .expect("default keywords are valid");
     if registry.index_of(&config.default_mode).is_none() {
         log::warn!(
             "unknown default_mode {:?}, using the first mode",
@@ -137,6 +161,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
+            let _ = wake.set(ctx.clone());
             let appearance = &config.appearance;
             if !theme::is_known(&appearance.theme) {
                 log::warn!("unknown theme {:?}, using Kanagawa", appearance.theme);
@@ -157,7 +182,7 @@ fn main() -> eframe::Result {
                 shared,
                 roots,
                 excludes: config.files.exclude_dir_names.clone(),
-                updated: Arc::new(AtomicBool::new(false)),
+                updated: results_changed.clone(),
                 ctx: ctx.clone(),
             };
             reindexer.run();
@@ -189,7 +214,7 @@ fn main() -> eframe::Result {
             .ok();
 
             let services = ui::Services {
-                index_updated: reindexer.updated.clone(),
+                results_changed,
                 shown,
                 window,
                 hotkey: hotkey.ok(),

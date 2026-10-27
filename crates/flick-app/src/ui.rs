@@ -34,8 +34,8 @@ pub type TrayQueue = Arc<Mutex<Vec<TrayCommand>>>;
 
 /// The parts of the app that keep running while the bar is hidden.
 pub struct Services {
-    /// Set by the indexing thread when a new file index is ready.
-    pub index_updated: Arc<AtomicBool>,
+    /// Set when results may have changed: a new file index, or suggestions arrived.
+    pub results_changed: Arc<AtomicBool>,
     /// Set by the hotkey handler each time it shows the bar.
     pub shown: Arc<AtomicBool>,
     pub window: WindowHandle,
@@ -447,7 +447,7 @@ impl eframe::App for FlickApp {
             self.launcher.reset();
             self.pending.clear();
         }
-        if self.services.index_updated.swap(false, Ordering::Relaxed) {
+        if self.services.results_changed.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();
         }
         let focused = ctx.input(|i| i.viewport().focused) == Some(true);
