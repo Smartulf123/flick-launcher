@@ -9,7 +9,7 @@ use crate::index::SharedIndex;
 use crate::modes::{FilesMode, WebSearchMode};
 use crate::registry::{ModeRegistry, RegistryError};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Global hotkey, e.g. `"Alt+Space"` or `"Ctrl+Space"`.
@@ -19,6 +19,61 @@ pub struct Config {
     pub max_results: usize,
     pub keywords: Keywords,
     pub files: FilesConfig,
+    pub appearance: Appearance,
+}
+
+/// How the bar looks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// Theme preset id, e.g. `"kanagawa"` or `"tokyo-night"`.
+    pub theme: String,
+    /// `"wallpaper"` (your desktop wallpaper), `"none"`, or a path to a picture.
+    pub background: String,
+    /// How dark the cards are over the picture, from 0 (clear) to 1 (solid).
+    pub tint: f32,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: "kanagawa".into(),
+            background: "wallpaper".into(),
+            tint: 0.55,
+        }
+    }
+}
+
+impl Appearance {
+    pub fn clamped_tint(&self) -> f32 {
+        self.tint.clamp(0.0, 1.0)
+    }
+}
+
+/// Where the background picture comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackgroundSource {
+    Wallpaper,
+    None,
+    File(PathBuf),
+}
+
+impl BackgroundSource {
+    pub fn from_setting(setting: &str) -> Self {
+        match setting.trim() {
+            "wallpaper" => Self::Wallpaper,
+            "" | "none" => Self::None,
+            path => Self::File(PathBuf::from(path)),
+        }
+    }
+
+    pub fn to_setting(&self) -> String {
+        match self {
+            Self::Wallpaper => "wallpaper".into(),
+            Self::None => "none".into(),
+            Self::File(path) => path.display().to_string(),
+        }
+    }
 }
 
 /// Action keywords: type `<keyword><space>` to jump to a mode.
@@ -48,6 +103,7 @@ impl Default for Config {
             max_results: 8,
             keywords: Keywords::default(),
             files: FilesConfig::default(),
+            appearance: Appearance::default(),
         }
     }
 }
@@ -92,13 +148,15 @@ pub fn load_or_create(path: &Path) -> (Config, Option<ConfigError>) {
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let config = Config::default();
-            (config.clone(), write_default(path, &config).err())
+            (config.clone(), save(path, &config).err())
         }
         Err(e) => (Config::default(), Some(e.into())),
     }
 }
 
-fn write_default(path: &Path, config: &Config) -> Result<(), ConfigError> {
+/// Writes the whole config, creating its folder if needed. Comments a user
+/// added by hand are not kept.
+pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -134,6 +192,53 @@ mod tests {
         assert!(err.is_none());
         assert_eq!(c, Config::default());
         assert!(path.exists());
+    }
+
+    #[test]
+    fn appearance_defaults() {
+        let a = Config::default().appearance;
+        assert_eq!(a.theme, "kanagawa");
+        assert_eq!(a.background, "wallpaper");
+        assert_eq!(a.tint, 0.55);
+    }
+
+    #[test]
+    fn background_setting_is_read() {
+        assert_eq!(
+            BackgroundSource::from_setting("wallpaper"),
+            BackgroundSource::Wallpaper
+        );
+        assert_eq!(
+            BackgroundSource::from_setting("none"),
+            BackgroundSource::None
+        );
+        assert_eq!(BackgroundSource::from_setting(""), BackgroundSource::None);
+        assert_eq!(
+            BackgroundSource::from_setting(r"C:\Pics\hinata.jpg"),
+            BackgroundSource::File(r"C:\Pics\hinata.jpg".into())
+        );
+    }
+
+    #[test]
+    fn tint_is_kept_between_zero_and_one() {
+        let mut c = Config::default();
+        c.appearance.tint = 3.0;
+        assert_eq!(c.appearance.clamped_tint(), 1.0);
+        c.appearance.tint = -1.0;
+        assert_eq!(c.appearance.clamped_tint(), 0.0);
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut c = Config::default();
+        c.appearance.theme = "dracula".into();
+        c.appearance.background = r"C:\Pics\hinata.jpg".into();
+        save(&path, &c).unwrap();
+        let (loaded, err) = load_or_create(&path);
+        assert!(err.is_none());
+        assert_eq!(loaded, c);
     }
 
     #[test]
