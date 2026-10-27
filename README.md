@@ -1,85 +1,117 @@
 # Flick
 
-A keyboard launcher for Windows 11, written entirely in Rust. Press a hotkey and a small search bar appears in the middle of the screen:
+**A fast keyboard launcher for Windows 11, written in Rust.**
 
-- **Google**: Enter opens a Google search in your default browser.
-- **YouTube**: Enter opens YouTube search results.
-- **Files**: fuzzy search over your Desktop, Documents and Downloads as you type (`bdgt` finds `budget_2026.xlsx`). Arrow keys pick, Enter opens.
+Press **Alt+Space** anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. Flick searches three places:
 
-The mode chips at the top show where you are. Tab and Shift+Tab switch modes, typing a prefix (`g `, `yt `, `f `) jumps to one, and you can click a chip or a result (hover a chip to see its prefix). In Google and YouTube mode, suggestions appear under your search as you type. Drag the cards' edges or the gap between them to move the window; the top 8 results are always shown in full, and the window slides up if needed to stay on the screen. Esc or clicking elsewhere hides the bar. Flick lives in the tray (Start with Windows, Background, Reload index, Quit).
+- **Google**: Enter opens a Google search in your default browser, with suggestions as you type.
+- **YouTube**: the same, for YouTube search results.
+- **Files**: fuzzy search over your own Desktop, Documents and Downloads folders as you type (`bdgt` finds `budget_2026.xlsx`). Files and folders show their real Windows icons.
 
-## Backgrounds
+It runs quietly in the tray, starts with Windows, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
-Click the gear at the top right of the bar (or right-click the bar, or use the tray's Background menu):
+Flick was inspired by [Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher) (modes you can switch between) and [look](https://github.com/kunkka19xx/look) (a launcher that looks good).
 
-- **Browse backgrounds...** opens the gallery inside the bar's window. **Built-in** has six public-domain pictures that ship with Flick; **Favorites** has pictures you kept; **Search online** searches [wallhaven.cc](https://wallhaven.cc) (safe-for-work only, always), and more pictures load as you scroll. Click a picture to use it as the background; tap the heart in its corner to keep it under Favorites (tap again to remove it). Esc or **Back** returns to the bar.
+## Download
+
+1. Download **`flick.exe`** from the [latest release](../../releases/latest).
+2. Move it somewhere it can stay, for example a new folder `C:\Tools\Flick`. Flick adds itself to your startup apps from wherever it is, so don't run it straight from Downloads if you tidy that folder.
+3. Double-click it. Nothing appears yet; that's normal. Press **Alt+Space**.
+
+Windows may show "Windows protected your PC" the first time, because the program isn't code-signed. Click **More info**, then **Run anyway**.
+
+Needs Windows 10 or 11 (64-bit). Nothing else to install.
+
+To remove Flick: right-click its tray icon, untick **Start with Windows**, choose **Quit**, and delete `flick.exe` and the folder `%APPDATA%\flick`.
+
+## Using it
+
+| Do this | To |
+|---|---|
+| **Alt+Space** | Show or hide the bar |
+| Type, then **Enter** | Search, or open the selected file |
+| **Tab** / **Shift+Tab** | Switch between Google, YouTube and Files |
+| Type `g `, `yt ` or `f ` (with the space) | Jump straight to that mode |
+| **↑** / **↓** | Pick a result |
+| **Esc**, or click elsewhere | Hide the bar |
+| Drag the edges of the bar | Move it |
+
+You can also click a mode chip or a result with the mouse; hover a chip to see its shortcut. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows**, **Background**, **Reload index** (scans your folders again right away) and **Quit**.
+
+### Your files
+
+Out of the box Flick indexes the Desktop, Documents and Downloads folders of whoever is signed in to Windows, including OneDrive-synced ones. To search other folders, list them under `files.roots` in the settings file (see [Settings](#settings)), then restart Flick (**Quit** in the tray menu, then start `flick.exe` again). The index refreshes itself every 30 minutes.
+
+### Backgrounds
+
+Click the gear and choose:
+
+- **Browse backgrounds...** opens a gallery with three tabs:
+  - **Built-in**: six public-domain pictures that ship with Flick.
+  - **Favorites**: pictures you kept from the online search.
+  - **Search online**: search [wallhaven.cc](https://wallhaven.cc) for wallpapers (safe-for-work results only, always). Click a picture to try it as your background; tap the heart in its corner to keep it under Favorites, and tap again to remove it. More pictures load as you scroll.
 - **Choose your own picture...** uses any JPG, PNG or WebP on your PC.
-- **None** shows the plain Kanagawa background.
+- **None** shows a plain dark background.
 
-Online pictures are scaled to 1280 px wide. Favorites are kept in `%APPDATA%\flick\backgrounds`; pictures you only clicked wait in `%APPDATA%\flick\cache` and are deleted when the gallery closes (except the one in use).
+## Settings
 
-## Rust only
+Flick creates `%APPDATA%\flick\config.toml` the first time it runs. Open it in any text editor; changes apply the next time Flick starts (**Quit** in the tray menu, then start `flick.exe` again).
 
-Every source file is Rust. No Electron, Tauri, webview or JavaScript. The window is [egui/eframe](https://github.com/emilk/egui) with the OpenGL (glow) renderer, and Windows APIs go through Microsoft's [windows](https://github.com/microsoft/windows-rs) crate.
+| Setting | Default | What it does |
+|---|---|---|
+| `hotkey` | `"Alt+Space"` | The key that shows the bar. Modifiers: `Alt`, `Ctrl`, `Shift`, `Super` (the Windows key), e.g. `"Ctrl+Space"`. |
+| `default_mode` | `"google"` | Mode the bar opens in: `google`, `youtube` or `files`. |
+| `max_results` | `8` | Most results shown at once. |
+| `suggestions` | `true` | Google and YouTube suggestions while you type. |
+| `keywords.google` / `.youtube` / `.files` | `"g"` / `"yt"` / `"f"` | The prefixes that jump to a mode. |
+| `files.roots` | `[]` | Folders to search. Empty means your Desktop, Documents and Downloads. Example: `roots = ['C:\Users\you\Projects', 'D:\Photos']` |
+| `files.exclude_dir_names` | `.git`, `node_modules`, `target`, `$RECYCLE.BIN` | Folder names skipped, with everything inside them. |
+| `files.reindex_minutes` | `30` | How often the file index is rebuilt. `0` turns it off. |
+| `appearance.background` | `"builtin:great-wave"` | Set from the gear menu: `builtin:<name>`, `none`, or a path to a picture. |
+| `appearance.tint` | `0.55` | How dark the bar is over the picture, from `0` (clear) to `1` (solid). |
 
-The code is split the way [look](https://github.com/kunkka19xx/look) splits its launcher:
+Choosing a background from the menu saves it into this file (comments you added are not kept). A broken settings file never stops Flick: it uses the defaults and writes what went wrong to `%APPDATA%\flick\flick.log`.
 
-- `crates/flick-core`: modes, prefix parsing, the file index, fuzzy matching ([nucleo](https://github.com/helix-editor/nucleo)), config and the launcher state machine. No UI code; fully unit-tested.
-- `crates/flick-app`: the window, global hotkey, tray icon and Win32 calls. It turns key presses into `Intent`s and carries out the `Effect`s the core returns.
+## Privacy
 
-## Build and run
+Flick has no account, no telemetry and no tracking. It only goes online for these:
 
-Needs Rust 1.95 or newer and the Visual Studio C++ build tools (for the linker).
+- **Search suggestions**: what you type in Google or YouTube mode is sent to Google's suggestion service, as a browser's search box does. Set `suggestions = false` to turn this off.
+- **The online gallery**: searches and pictures come from wallhaven.cc, only while the gallery's online tab is open.
+
+Your file index stays in memory on your PC and is never sent anywhere.
+
+## Building from source
+
+Needs [Rust](https://rustup.rs) 1.95 or newer and the Visual Studio C++ build tools.
 
 ```bash
+git clone https://github.com/Smartulf123/flick-launcher.git
+cd flick-launcher
 cargo build --release
 ```
 
-Run `target\release\flick.exe`. Nothing appears until you press the hotkey (Alt+Space by default). The first run adds Flick to your startup list, so it is ready after every restart; untick **Start with Windows** in the tray menu to stop that.
+The program is `target\release\flick.exe`. `cargo test --workspace` runs the tests.
 
-## Configuration
+### How it's built
 
-`%APPDATA%\flick\config.toml` is created with these defaults on first run:
+Every line is Rust: no Electron, Tauri, webview or JavaScript. The window is [egui/eframe](https://github.com/emilk/egui) with the OpenGL renderer, and Windows APIs go through Microsoft's [windows](https://github.com/microsoft/windows-rs) crate.
 
-| Key | Default | Meaning |
-|---|---|---|
-| `hotkey` | `"Alt+Space"` | Global hotkey. Modifiers: `Alt`, `Ctrl`, `Shift`, `Super` (Windows key). |
-| `default_mode` | `"google"` | Mode shown when the bar opens: `google`, `youtube` or `files`. |
-| `max_results` | `8` | Most results shown at once. |
-| `suggestions` | `true` | Google and YouTube suggestions while you type. This sends what you type to Google, as a browser search box does; set `false` to turn it off. |
-| `keywords.google` / `.youtube` / `.files` | `"g"` / `"yt"` / `"f"` | Prefixes that jump to a mode. |
-| `files.roots` | `[]` | Folders to index. Empty means Desktop, Documents and Downloads (OneDrive folders included). |
-| `files.exclude_dir_names` | `.git`, `node_modules`, `target`, `$RECYCLE.BIN` | Folder names skipped with their contents. |
-| `files.reindex_minutes` | `30` | How often the index is rebuilt. `0` turns it off. |
-| `appearance.background` | `"builtin:great-wave"` | `builtin:<id>` (`great-wave`, `red-fuji`, `starry-night`, `impression-sunrise`, `earthrise`, `pillars-of-creation`), `none`, or a path to a JPG, PNG or WebP. Set from the gear menu. |
-| `appearance.tint` | `0.55` | How dark the cards are over the picture, from `0` (clear) to `1` (solid). |
+- `crates/flick-core`: the modes, prefix parsing, file index, fuzzy matching ([nucleo](https://github.com/helix-editor/nucleo)), settings and the launcher's state machine. No UI code, fully unit-tested.
+- `crates/flick-app`: the window, hotkey, tray icon, background gallery and Windows calls.
 
-Choosing a background saves it into this file, rewriting it (hand-written comments are not kept).
+It is light: a single 10 MB program that uses no CPU while hidden and about 80 MB of memory with a 150,000-file index (most of that is the index).
 
-A broken config file never stops Flick: it falls back to the defaults and writes the error to `%APPDATA%\flick\flick.log` (replaced at each start).
-
-## Adding a mode
+### Adding a mode
 
 1. Add a file in `crates/flick-core/src/modes/` with a type that implements `SearchMode` (`id`, `name`, `query`).
-2. Register it in `config::build_registry` and add its keyword to `Keywords`.
+2. Register it in `config::build_registry` and give it a keyword in `Keywords`.
 
-That is the whole contract, modelled on Flow Launcher's plugins: each mode returns results with a title, subtitle, score and an `Action` (`OpenUrl`, `OpenPath` or `None`).
-
-## Measured (release build, 26 October 2026)
-
-| | |
-|---|---|
-| `flick.exe` size | 6.3 MB |
-| Index | 147,671 files and folders built in 1.3 to 2.7 s |
-| Memory, idle and hidden, with that index | 64.6 MB private working set |
-| Memory with an empty index | 29.5 MB |
-| CPU while idle | 0 (no repaints while hidden) |
-
-The index accounts for most of the memory (about 240 bytes per entry). A more compact index layout is the next memory win.
+Each mode returns results with a title, subtitle, score and an action (`OpenUrl`, `OpenPath` or `None`). Ideas: apps, Windows settings, a calculator, GitHub.
 
 ## Credits
 
-Built-in backgrounds, all public domain via Wikimedia Commons (details in `crates/flick-app/assets/backgrounds/CREDITS.md`):
+Built-in backgrounds, all public domain via Wikimedia Commons (sources in [`CREDITS.md`](crates/flick-app/assets/backgrounds/CREDITS.md)):
 
 - *The Great Wave off Kanagawa* and *Fine Wind, Clear Morning (Red Fuji)*, Katsushika Hokusai
 - *The Starry Night*, Vincent van Gogh
@@ -87,8 +119,8 @@ Built-in backgrounds, all public domain via Wikimedia Commons (details in `crate
 - *Earthrise*, NASA, Apollo 8 (Bill Anders)
 - *Pillars of Creation*, NASA, ESA and the Hubble Heritage Team
 
-Online backgrounds come from [wallhaven.cc](https://wallhaven.cc) and belong to their creators. Flick downloads one only when you pick it, for your own background, and never bundles or uploads them.
+Online backgrounds come from [wallhaven.cc](https://wallhaven.cc) and belong to their creators. Flick downloads one only when you choose it, for your own use, and never bundles or uploads them. The colours are the [Kanagawa](https://github.com/rebelot/kanagawa.nvim) palette.
 
-## Later
+## License
 
-Apps, Windows settings and GitHub modes; an NTFS MFT/USN or Everything-backed index for whole-PC search; frecency ranking; an installer with cargo-packager.
+[MIT](LICENSE)

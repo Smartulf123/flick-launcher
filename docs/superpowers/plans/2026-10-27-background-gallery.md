@@ -75,7 +75,7 @@
 - Consumes: `BackgroundSource` (Task 1).
 - Produces: `pub struct Builtin { pub id: &'static str, pub title: &'static str, pub credit: &'static str, pub bytes: &'static [u8] }`; `pub const BUILTINS: [Builtin; 6]` (menu order from Global Constraints); `pub fn find(id: &str) -> Option<&'static Builtin>`. In `background.rs`: `pub fn decode(bytes: &[u8]) -> anyhow::Result<ColorImage>` (format guessed, scaled to `MAX_WIDTH`; `load(path)` reads the file and calls it), `pub fn load_source(source: &BackgroundSource) -> anyhow::Result<Option<ColorImage>>`. Remove `wallpaper_path`, `resolve`, `windows_pictures_dir`.
 
-- [ ] **Step 1: Assets.** Take the 1280 px files from `C:\Users\kaspe\dev\testing-skill\background-candidates\` (`great-wave`, `red-fuji`, `starry-night`, `impression-sunrise`, `earthrise`, and `pillars-hubble` saved as `pillars-of-creation`) and re-save each as JPEG quality 85 (System.Drawing, as used before). Expected: six files, each under 600 KB. `CREDITS.md`: one line per picture with title, artist/source, "Public domain, via Wikimedia Commons" and its Commons page URL from `background-candidates\picks.tsv`.
+- [ ] **Step 1: Assets.** Take the 1280 px files from a local `background-candidates` folder (`great-wave`, `red-fuji`, `starry-night`, `impression-sunrise`, `earthrise`, and `pillars-hubble` saved as `pillars-of-creation`) and re-save each as JPEG quality 85 (System.Drawing, as used before). Expected: six files, each under 600 KB. `CREDITS.md`: one line per picture with title, artist/source, "Public domain, via Wikimedia Commons" and its Commons page URL from its `picks.tsv`.
 - [ ] **Step 2: Failing tests** in `builtin_backgrounds.rs`:
 
 ```rust

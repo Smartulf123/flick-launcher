@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Rust only: every source file is `.rs` (plus `Cargo.toml`/`.toml`/`.md`). No Tauri app, webview, HTML/CSS/JS, Node tooling or C/C++ sources. Win32 calls go through the `windows` crate.
-- Project folder: `C:\Users\kaspe\dev\flick` (a new git repo). All commands below run from there.
+- Project folder: the repository root. All commands below run from there.
 - Workspace: `crates/flick-core` (lib, no UI, no `windows`/`eframe` deps) and `crates/flick-app` (bin `flick`, Windows-only).
 - `rust-version = "1.95"` and `edition = "2024"` in the workspace (egui 0.37 requires 1.95).
 - eframe: `default-features = false, features = ["default_fonts", "glow", "winit/default"]`.
