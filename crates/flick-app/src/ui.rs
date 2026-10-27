@@ -75,6 +75,8 @@ pub struct FlickApp {
     positioned: bool,
     /// The selected row last drawn, to scroll a newly selected row into view.
     shown_selection: Option<usize>,
+    /// The search box was right-clicked; open the Theme and Background menu.
+    wants_bar_menu: bool,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -109,6 +111,7 @@ impl FlickApp {
             was_focused: false,
             positioned: false,
             shown_selection: None,
+            wants_bar_menu: false,
         }
     }
 
@@ -248,6 +251,11 @@ impl FlickApp {
                 );
                 // This, not key consumption, is what keeps focus here after Tab.
                 response.request_focus();
+                if response.secondary_clicked() {
+                    // Opened at the start of the next frame, with the bar drawn.
+                    self.wants_bar_menu = true;
+                    ui.ctx().request_repaint();
+                }
                 if response.changed() {
                     self.launcher.set_input(&text);
                 }
@@ -346,12 +354,12 @@ fn mode_chip(
             ui.horizontal(|ui| {
                 icon_slot(ui, Icon::for_mode(name), 14.0, text);
                 ui.label(RichText::new(name).size(13.0).color(text));
-                ui.label(RichText::new(keyword).size(12.0).color(p.muted));
             });
         })
         .response
         .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(theme::chip_tip(keyword))
 }
 
 /// Draws a result's icon and returns its kind label ("Google", "Microsoft
@@ -516,10 +524,18 @@ impl eframe::App for FlickApp {
         let mover = ui.interact(
             window,
             ui.scope_id().with("move window"),
-            egui::Sense::drag(),
+            egui::Sense::click_and_drag(),
         );
         if mover.drag_started() {
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        }
+        // Right-click on the bar: the Theme and Background menu, right here.
+        if (mover.secondary_clicked() || std::mem::take(&mut self.wants_bar_menu))
+            && let Some(tray) = &self.services.tray
+        {
+            tray.show_bar_menu(self.services.window.raw());
+            // The pop-up takes focus while open; give it back to the search box.
+            self.services.window.show_and_focus();
         }
 
         let content = egui::Frame::NONE

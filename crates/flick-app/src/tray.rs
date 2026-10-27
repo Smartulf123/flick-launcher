@@ -4,7 +4,7 @@
 use anyhow::Context as _;
 use flick_core::config::BackgroundSource;
 use tray_icon::menu::{
-    CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
+    CheckMenuItem, ContextMenu, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
 };
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
@@ -64,9 +64,20 @@ pub struct Tray {
     themes: Vec<CheckMenuItem>,
     wallpaper: CheckMenuItem,
     no_background: CheckMenuItem,
+    /// Theme and Background, shown when the bar itself is right-clicked.
+    bar_menu: Menu,
 }
 
 impl Tray {
+    /// Pops up Theme and Background at the mouse pointer, over `hwnd`.
+    /// Blocks until the menu closes; a choice arrives as a normal tray command.
+    pub fn show_bar_menu(&self, hwnd: isize) {
+        // SAFETY: `hwnd` is the bar's own live window, owned by this thread.
+        unsafe {
+            self.bar_menu.show_context_menu_for_hwnd(hwnd, None);
+        }
+    }
+
     /// Ticks the theme at `index` and unticks the rest.
     pub fn show_theme(&self, index: usize) {
         for (i, item) in self.themes.iter().enumerate() {
@@ -137,6 +148,10 @@ pub fn build(
     menu.append(&autostart)?;
     menu.append(&theme_menu)?;
     menu.append(&background_menu)?;
+
+    let bar_menu = Menu::new();
+    bar_menu.append(&theme_menu)?;
+    bar_menu.append(&background_menu)?;
     menu.append(&reload)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&quit)?;
@@ -160,6 +175,7 @@ pub fn build(
         themes,
         wallpaper,
         no_background,
+        bar_menu,
     };
     tray.show_background(background);
     Ok(tray)

@@ -28,6 +28,11 @@ impl WindowHandle {
         }
     }
 
+    /// The raw window handle, for APIs that take it as a number.
+    pub fn raw(self) -> isize {
+        self.0
+    }
+
     fn hwnd(self) -> HWND {
         HWND(self.0 as *mut _)
     }
