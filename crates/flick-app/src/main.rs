@@ -4,10 +4,7 @@ mod actions;
 mod autostart;
 mod background;
 mod builtin_backgrounds;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired into the window in a later task")
-)]
+#[expect(dead_code, reason = "wired into the window in a later task")]
 mod gallery_loader;
 mod hotkey;
 mod http;
