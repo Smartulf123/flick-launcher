@@ -3,6 +3,7 @@
 mod actions;
 mod autostart;
 mod background;
+mod builtin_backgrounds;
 mod hotkey;
 mod icons;
 mod paths;

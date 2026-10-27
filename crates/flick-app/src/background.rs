@@ -3,11 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::builtin_backgrounds;
 use anyhow::Context as _;
 use eframe::egui::{ColorImage, Rect, Vec2, pos2};
 use flick_core::config::BackgroundSource;
-use winreg::RegKey;
-use winreg::enums::HKEY_CURRENT_USER;
 
 /// Pictures wider than this are scaled down when loaded; the window is
 /// 640 px wide, so this keeps memory small with room for high-DPI screens.
@@ -39,14 +38,13 @@ pub fn scaled_size(width: u32, height: u32, max_width: u32) -> (u32, u32) {
     }
 }
 
-/// Decodes a JPG, PNG or WebP (the format is read from the file itself, so
-/// Windows' extension-less wallpaper copy works) and scales it down.
-pub fn load(path: &Path) -> anyhow::Result<ColorImage> {
-    let picture = image::ImageReader::open(path)
-        .with_context(|| format!("cannot open {}", path.display()))?
+/// Decodes a JPG, PNG or WebP (the format is read from the bytes, not a
+/// file extension) and scales it down to at most `MAX_WIDTH` wide.
+pub fn decode(bytes: &[u8]) -> anyhow::Result<ColorImage> {
+    let picture = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()?
         .decode()
-        .with_context(|| format!("cannot read {} as a picture", path.display()))?;
+        .context("not a picture Flick can read")?;
     let (w, h) = scaled_size(picture.width(), picture.height(), MAX_WIDTH);
     let picture = if (w, h) == (picture.width(), picture.height()) {
         picture
@@ -60,35 +58,23 @@ pub fn load(path: &Path) -> anyhow::Result<ColorImage> {
     ))
 }
 
-/// The current desktop wallpaper, from the registry or Windows' own copy.
-pub fn wallpaper_path() -> Option<PathBuf> {
-    let from_registry = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey(r"Control Panel\Desktop")
-        .and_then(|k| k.get_value::<String, _>("WallPaper"))
-        .ok()
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .filter(|p| p.is_file());
-    from_registry.or_else(|| {
-        let copy = PathBuf::from(std::env::var_os("APPDATA")?)
-            .join(r"Microsoft\Windows\Themes\TranscodedWallpaper");
-        copy.is_file().then_some(copy)
-    })
+/// Reads and decodes a picture file.
+pub fn load(path: &Path) -> anyhow::Result<ColorImage> {
+    let bytes = std::fs::read(path).with_context(|| format!("cannot open {}", path.display()))?;
+    decode(&bytes).with_context(|| format!("cannot read {} as a picture", path.display()))
 }
 
-/// The picture file for a background setting, if any.
-pub fn resolve(source: &BackgroundSource) -> Option<PathBuf> {
+/// The picture for a background setting: `None` for no picture.
+pub fn load_source(source: &BackgroundSource) -> anyhow::Result<Option<ColorImage>> {
     match source {
-        BackgroundSource::Wallpaper => wallpaper_path(),
-        BackgroundSource::None => None,
-        BackgroundSource::File(path) => Some(path.clone()),
+        BackgroundSource::None => Ok(None),
+        BackgroundSource::File(path) => load(path).map(Some),
+        BackgroundSource::Builtin(id) => {
+            let builtin = builtin_backgrounds::find(id)
+                .with_context(|| format!("no built-in background called {id:?}"))?;
+            decode(builtin.bytes).map(Some)
+        }
     }
-}
-
-/// Where Windows keeps its built-in wallpapers.
-pub fn windows_pictures_dir() -> PathBuf {
-    PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()))
-        .join("Web")
 }
 
 /// Opens the Windows file picker for a picture, starting in `start`.
@@ -157,5 +143,24 @@ mod tests {
     #[test]
     fn missing_picture_is_an_error_not_a_panic() {
         assert!(load(Path::new(r"C:\definitely\not\here.jpg")).is_err());
+    }
+
+    #[test]
+    fn builtin_source_loads() {
+        assert!(
+            load_source(&BackgroundSource::Builtin("great-wave".into()))
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn unknown_builtin_is_an_error() {
+        assert!(load_source(&BackgroundSource::Builtin("nope".into())).is_err());
+    }
+
+    #[test]
+    fn none_loads_nothing() {
+        assert!(load_source(&BackgroundSource::None).unwrap().is_none());
     }
 }
