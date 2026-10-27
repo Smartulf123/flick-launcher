@@ -14,6 +14,11 @@ mod suggest_fetch;
 mod theme;
 mod tray;
 mod ui;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by the gallery loader (next task)")
+)]
+mod wallhaven;
 mod window;
 
 use std::fs::File;

@@ -714,10 +714,12 @@ dependencies = [
  "open",
  "raw-window-handle",
  "rfd",
+ "serde_json",
  "simplelog",
  "tempfile",
  "tray-icon",
  "ureq",
+ "url",
  "windows",
  "winreg",
 ]
