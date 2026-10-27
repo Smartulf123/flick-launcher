@@ -20,7 +20,7 @@ use crate::shell_icons::IconCache;
 use crate::theme::{self, PRESETS, Palette};
 use crate::tray::{BackgroundChoice, Tray, TrayCommand};
 use crate::window::WindowHandle;
-use crate::{autostart, background, paths};
+use crate::{autostart, background, paths, placement};
 
 pub const WIDTH: f32 = 640.0;
 /// Height before the first frame measures the real content.
@@ -71,6 +71,10 @@ pub struct FlickApp {
     pending: Vec<Intent>,
     height: f32,
     was_focused: bool,
+    /// Whether the window has been moved to its opening spot yet.
+    positioned: bool,
+    /// The selected row last drawn, to scroll a newly selected row into view.
+    shown_selection: Option<usize>,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -103,6 +107,8 @@ impl FlickApp {
             pending: Vec::new(),
             height: START_HEIGHT,
             was_focused: false,
+            positioned: false,
+            shown_selection: None,
         }
     }
 
@@ -256,14 +262,30 @@ impl FlickApp {
             // Moving the mouse over a row selects it; a resting pointer does
             // not fight the arrow keys.
             let pointer_moved = ui.input(|i| i.pointer.is_moving());
-            for (i, item) in self.launcher.results().iter().enumerate() {
-                let response = result_row(ui, p, &mut self.icons, item, i == selected);
-                if response.clicked() {
-                    clicked_row = Some(i);
-                } else if pointer_moved && response.hovered() && i != selected {
-                    hovered_row = Some(i);
-                }
-            }
+            // The list scrolls instead of pushing the window off the screen.
+            let max_height = ui.input(|i| {
+                let monitor = i.viewport().monitor_size.map_or(f32::INFINITY, |m| m.y);
+                let top = i.viewport().outer_rect.map_or(0.0, |r| r.top());
+                placement::list_max_height(monitor, top)
+            });
+            let scroll_to_selected = self.shown_selection != Some(selected);
+            self.shown_selection = Some(selected);
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for (i, item) in self.launcher.results().iter().enumerate() {
+                        let response = result_row(ui, p, &mut self.icons, item, i == selected);
+                        if i == selected && scroll_to_selected {
+                            response.scroll_to_me(None);
+                        }
+                        if response.clicked() {
+                            clicked_row = Some(i);
+                        } else if pointer_moved && response.hovered() && i != selected {
+                            hovered_row = Some(i);
+                        }
+                    }
+                });
             if !self.launcher.results().is_empty() {
                 ui.add_space(4.0);
                 let y = ui.cursor().top();
@@ -442,10 +464,19 @@ impl eframe::App for FlickApp {
         for command in commands {
             self.handle_tray(ctx, command);
         }
+        if !self.positioned
+            && let Some(monitor) = ctx.input(|i| i.viewport().monitor_size)
+        {
+            // Open a bit above the middle so the list has room to grow.
+            let at = placement::initial_position(monitor, WIDTH);
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(at));
+            self.positioned = true;
+        }
         if self.services.shown.swap(false, Ordering::Relaxed) {
             // Every show starts empty, whatever happened before the last hide.
             self.launcher.reset();
             self.pending.clear();
+            self.shown_selection = None;
         }
         if self.services.results_changed.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();
@@ -485,6 +516,17 @@ impl eframe::App for FlickApp {
             None => {
                 ui.painter().rect_filled(window, 0, self.palette.background);
             }
+        }
+
+        // Dragging anywhere that is not a text box or a row moves the window.
+        // Added before the cards, so the cards' own widgets win their clicks.
+        let mover = ui.interact(
+            window,
+            ui.scope_id().with("move window"),
+            egui::Sense::drag(),
+        );
+        if mover.drag_started() {
+            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
 
         let content = egui::Frame::NONE

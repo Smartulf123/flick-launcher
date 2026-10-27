@@ -6,6 +6,7 @@ mod background;
 mod hotkey;
 mod icons;
 mod paths;
+mod placement;
 mod shell_icons;
 mod single_instance;
 mod suggest_fetch;
