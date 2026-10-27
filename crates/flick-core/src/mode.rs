@@ -35,8 +35,6 @@ pub struct ResultItem {
 }
 
 /// A search mode such as Google, YouTube or Files.
-///
-/// The action keyword that selects a mode is configuration, not part of the mode.
 pub trait SearchMode: Send + Sync {
     /// Stable identifier used in the config file, e.g. `"google"`.
     fn id(&self) -> &str;

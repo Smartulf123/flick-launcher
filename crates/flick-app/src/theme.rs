@@ -67,11 +67,6 @@ pub fn apply(ctx: &egui::Context, palette: &Palette) {
     });
 }
 
-/// Hover text on a mode chip: how to jump to it by typing.
-pub fn chip_tip(keyword: &str) -> String {
-    format!("Type {keyword} and a space to jump here")
-}
-
 /// Grey text shown in the empty search box.
 pub fn placeholder(mode_name: &str) -> String {
     match mode_name {
@@ -100,11 +95,6 @@ mod tests {
         assert!(fill.a() >= 215, "{}", fill.a());
         assert!(fill.a() > card_fill(&KANAGAWA, 0.55).a());
         assert_eq!(fill.to_opaque(), KANAGAWA.background);
-    }
-
-    #[test]
-    fn chip_tip_explains_the_keyword() {
-        assert_eq!(chip_tip("yt"), "Type yt and a space to jump here");
     }
 
     #[test]

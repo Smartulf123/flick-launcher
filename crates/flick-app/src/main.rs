@@ -27,7 +27,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use flick_core::config::{self, BackgroundSource, Config};
+use flick_core::config::{self, BackgroundSource};
 use flick_core::index::{self, SharedIndex};
 use flick_core::launcher::Launcher;
 use flick_core::modes::suggest::{SuggestionCache, Suggestions};
@@ -128,12 +128,7 @@ fn main() -> eframe::Result {
 
     let shared = SharedIndex::default();
     let (registry, default_mode) =
-        config::build_registry_with(&config, shared.clone(), Some(suggestions.clone()))
-            .or_else(|e| {
-                log::error!("bad keywords in config, using defaults: {e}");
-                config::build_registry_with(&Config::default(), shared.clone(), Some(suggestions))
-            })
-            .expect("default keywords are valid");
+        config::build_registry_with(&config, shared.clone(), Some(suggestions));
     if registry.index_of(&config.default_mode).is_none() {
         log::warn!(
             "unknown default_mode {:?}, using the first mode",

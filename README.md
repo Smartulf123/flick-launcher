@@ -10,8 +10,6 @@ Press **Alt+Space** anywhere and a small search bar appears in the middle of you
 
 It runs quietly in the tray, starts with Windows, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
-Flick was inspired by [Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher) (modes you can switch between) and [look](https://github.com/kunkka19xx/look) (a launcher that looks good).
-
 ## Download
 
 1. Download **`flick.exe`** from the [latest release](../../releases/latest).
@@ -31,12 +29,11 @@ To remove Flick: right-click its tray icon, untick **Start with Windows**, choos
 | **Alt+Space** | Show or hide the bar |
 | Type, then **Enter** | Search, or open the selected file |
 | **Tab** / **Shift+Tab** | Switch between Google, YouTube and Files |
-| Type `g `, `yt ` or `f ` (with the space) | Jump straight to that mode |
 | **↑** / **↓** | Pick a result |
 | **Esc**, or click elsewhere | Hide the bar |
 | Drag the edges of the bar | Move it |
 
-You can also click a mode chip or a result with the mouse; hover a chip to see its shortcut. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows**, **Background**, **Reload index** (scans your folders again right away) and **Quit**.
+You can also click a mode chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows**, **Background**, **Reload index** (scans your folders again right away) and **Quit**.
 
 ### Your files
 
@@ -63,7 +60,6 @@ Flick creates `%APPDATA%\flick\config.toml` the first time it runs. Open it in a
 | `default_mode` | `"google"` | Mode the bar opens in: `google`, `youtube` or `files`. |
 | `max_results` | `8` | Most results shown at once. |
 | `suggestions` | `true` | Google and YouTube suggestions while you type. |
-| `keywords.google` / `.youtube` / `.files` | `"g"` / `"yt"` / `"f"` | The prefixes that jump to a mode. |
 | `files.roots` | `[]` | Folders to search. Empty means your Desktop, Documents and Downloads. Example: `roots = ['C:\Users\you\Projects', 'D:\Photos']` |
 | `files.exclude_dir_names` | `.git`, `node_modules`, `target`, `$RECYCLE.BIN` | Folder names skipped, with everything inside them. |
 | `files.reindex_minutes` | `30` | How often the file index is rebuilt. `0` turns it off. |
@@ -97,7 +93,7 @@ The program is `target\release\flick.exe`. `cargo test --workspace` runs the tes
 
 Every line is Rust: no Electron, Tauri, webview or JavaScript. The window is [egui/eframe](https://github.com/emilk/egui) with the OpenGL renderer, and Windows APIs go through Microsoft's [windows](https://github.com/microsoft/windows-rs) crate.
 
-- `crates/flick-core`: the modes, prefix parsing, file index, fuzzy matching ([nucleo](https://github.com/helix-editor/nucleo)), settings and the launcher's state machine. No UI code, fully unit-tested.
+- `crates/flick-core`: the modes, file index, fuzzy matching ([nucleo](https://github.com/helix-editor/nucleo)), settings and the launcher's state machine. No UI code, fully unit-tested.
 - `crates/flick-app`: the window, hotkey, tray icon, background gallery and Windows calls.
 
 It is light: a single 10 MB program that uses no CPU while hidden and about 80 MB of memory with a 150,000-file index (most of that is the index).
@@ -105,7 +101,7 @@ It is light: a single 10 MB program that uses no CPU while hidden and about 80 M
 ### Adding a mode
 
 1. Add a file in `crates/flick-core/src/modes/` with a type that implements `SearchMode` (`id`, `name`, `query`).
-2. Register it in `config::build_registry` and give it a keyword in `Keywords`.
+2. Register it in `config::build_registry`; it joins the Tab order and gets a chip.
 
 Each mode returns results with a title, subtitle, score and an action (`OpenUrl`, `OpenPath` or `None`). Ideas: apps, Windows settings, a calculator, GitHub.
 

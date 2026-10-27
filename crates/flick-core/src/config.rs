@@ -1,4 +1,4 @@
-//! `config.toml`: hotkey, default mode, action keywords and file-search roots.
+//! `config.toml`: hotkey, default mode, file-search roots and appearance.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::index::SharedIndex;
 use crate::modes::suggest::Suggestions;
 use crate::modes::{FilesMode, WebSearchMode};
-use crate::registry::{ModeRegistry, RegistryError};
+use crate::registry::ModeRegistry;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -21,7 +21,6 @@ pub struct Config {
     /// Show Google and YouTube suggestions while typing. Sends what you
     /// type to Google, as a browser search box does.
     pub suggestions: bool,
-    pub keywords: Keywords,
     pub files: FilesConfig,
     pub appearance: Appearance,
 }
@@ -85,15 +84,6 @@ impl BackgroundSource {
     }
 }
 
-/// Action keywords: type `<keyword><space>` to jump to a mode.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Keywords {
-    pub google: String,
-    pub youtube: String,
-    pub files: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FilesConfig {
@@ -111,19 +101,8 @@ impl Default for Config {
             default_mode: "google".into(),
             max_results: 8,
             suggestions: true,
-            keywords: Keywords::default(),
             files: FilesConfig::default(),
             appearance: Appearance::default(),
-        }
-    }
-}
-
-impl Default for Keywords {
-    fn default() -> Self {
-        Self {
-            google: "g".into(),
-            youtube: "yt".into(),
-            files: "f".into(),
         }
     }
 }
@@ -177,10 +156,7 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
 
 /// Registers the built-in modes in Tab order (Google, YouTube, Files) and
 /// returns the index of `default_mode`, or 0 when it names no mode.
-pub fn build_registry(
-    config: &Config,
-    index: SharedIndex,
-) -> Result<(ModeRegistry, usize), RegistryError> {
+pub fn build_registry(config: &Config, index: SharedIndex) -> (ModeRegistry, usize) {
     build_registry_with(config, index, None)
 }
 
@@ -190,24 +166,18 @@ pub fn build_registry_with(
     config: &Config,
     index: SharedIndex,
     suggestions: Option<Suggestions>,
-) -> Result<(ModeRegistry, usize), RegistryError> {
+) -> (ModeRegistry, usize) {
     let suggestions = suggestions.filter(|_| config.suggestions);
     let web = |mode: WebSearchMode| match &suggestions {
         Some(s) => mode.with_suggestions(s.clone()),
         None => mode,
     };
     let mut registry = ModeRegistry::new();
-    registry.register(
-        &config.keywords.google,
-        Box::new(web(WebSearchMode::google())),
-    )?;
-    registry.register(
-        &config.keywords.youtube,
-        Box::new(web(WebSearchMode::youtube())),
-    )?;
-    registry.register(&config.keywords.files, Box::new(FilesMode::new(index)))?;
+    registry.register(Box::new(web(WebSearchMode::google())));
+    registry.register(Box::new(web(WebSearchMode::youtube())));
+    registry.register(Box::new(FilesMode::new(index)));
     let default = registry.index_of(&config.default_mode).unwrap_or(0);
-    Ok((registry, default))
+    (registry, default)
 }
 
 #[cfg(test)]
@@ -255,8 +225,7 @@ mod tests {
             &Config::default(),
             Default::default(),
             Some(suggestions(&recorder)),
-        )
-        .unwrap();
+        );
         r.mode(0).query("rust", 8);
         r.mode(1).query("lofi", 8);
         assert_eq!(
@@ -272,8 +241,7 @@ mod tests {
             suggestions: false,
             ..Config::default()
         };
-        let (r, _) =
-            build_registry_with(&config, Default::default(), Some(suggestions(&recorder))).unwrap();
+        let (r, _) = build_registry_with(&config, Default::default(), Some(suggestions(&recorder)));
         r.mode(0).query("rust", 8);
         assert!(recorder.0.lock().unwrap().is_empty());
     }
@@ -366,14 +334,6 @@ background = \"wallpaper\"
             ("Alt+Space", "google", 8)
         );
         assert_eq!(
-            (
-                c.keywords.google.as_str(),
-                c.keywords.youtube.as_str(),
-                c.keywords.files.as_str()
-            ),
-            ("g", "yt", "f")
-        );
-        assert_eq!(
             c.files.exclude_dir_names,
             [".git", "node_modules", "target", "$RECYCLE.BIN"]
         );
@@ -390,7 +350,17 @@ background = \"wallpaper\"
         assert!(err.is_none());
         assert_eq!(c.hotkey, "Ctrl+Space");
         assert_eq!(c.max_results, 8);
-        assert_eq!(c.keywords.youtube, "yt");
+    }
+
+    #[test]
+    fn old_keywords_section_is_ignored() {
+        // Config files from before prefixes were removed still load.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "max_results = 5\n\n[keywords]\ngoogle = \"g\"\n").unwrap();
+        let (c, err) = load_or_create(&path);
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(c.max_results, 5);
     }
 
     #[test]
@@ -410,14 +380,14 @@ background = \"wallpaper\"
             default_mode: "bing".into(),
             ..Config::default()
         };
-        assert_eq!(build_registry(&c, Default::default()).unwrap().1, 0);
+        assert_eq!(build_registry(&c, Default::default()).1, 0);
     }
 
     #[test]
-    fn registry_uses_configured_keywords() {
-        let mut c = Config::default();
-        c.keywords.youtube = "y".into();
-        let (r, _) = build_registry(&c, Default::default()).unwrap();
-        assert_eq!(r.parse("y cats", 0).mode, 1);
+    fn registry_has_google_youtube_files_in_order() {
+        let (r, default) = build_registry(&Config::default(), Default::default());
+        let ids: Vec<_> = (0..r.len()).map(|i| r.mode(i).id()).collect();
+        assert_eq!(ids, ["google", "youtube", "files"]);
+        assert_eq!(default, 0);
     }
 }

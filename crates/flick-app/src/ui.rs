@@ -471,9 +471,9 @@ impl FlickApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let active = self.launcher.effective_mode();
-                for (i, (name, keyword)) in self.launcher.modes().into_iter().enumerate() {
-                    if mode_chip(ui, p, name, keyword, i == active).clicked() {
+                let active = self.launcher.active_mode();
+                for (i, name) in self.launcher.modes().into_iter().enumerate() {
+                    if mode_chip(ui, p, name, i == active).clicked() {
                         clicked_mode = Some(i);
                     }
                 }
@@ -488,7 +488,7 @@ impl FlickApp {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 icon_slot(ui, Icon::Search, ICON_SIZE, p.muted);
-                let placeholder = theme::placeholder(self.launcher.effective_mode_name());
+                let placeholder = theme::placeholder(self.launcher.active_mode_name());
                 let mut text = self.launcher.input().to_owned();
                 let response = ui.add(
                     TextEdit::singleline(&mut text)
@@ -577,14 +577,8 @@ fn icon_slot(ui: &mut egui::Ui, icon: Icon, size: f32, color: Color32) {
     icon.paint(ui.painter(), rect.shrink(1.0), color);
 }
 
-/// A mode chip: icon, name and its keyword. Clickable.
-fn mode_chip(
-    ui: &mut egui::Ui,
-    p: &Palette,
-    name: &str,
-    keyword: &str,
-    active: bool,
-) -> egui::Response {
+/// A mode chip: icon and name. Clickable.
+fn mode_chip(ui: &mut egui::Ui, p: &Palette, name: &str, active: bool) -> egui::Response {
     // Every chip has its own dark backing and bright text; the active one
     // stands out by its fill and accent outline.
     let (fill, stroke) = if active {
@@ -608,7 +602,6 @@ fn mode_chip(
         .response
         .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(theme::chip_tip(keyword))
 }
 
 /// The gear at the end of the chip row; opens Theme and Background.

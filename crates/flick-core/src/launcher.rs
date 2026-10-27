@@ -69,9 +69,9 @@ impl Launcher {
         self.selected = index.min(self.results.len().saturating_sub(1));
     }
 
-    /// The mode that answers the current input (a prefix overrides the active mode).
-    pub fn effective_mode_name(&self) -> &str {
-        self.registry.mode(self.effective_mode()).name()
+    /// Name of the mode that answers the input.
+    pub fn active_mode_name(&self) -> &str {
+        self.registry.mode(self.active).name()
     }
 
     pub fn handle(&mut self, intent: Intent) -> Vec<Effect> {
@@ -80,8 +80,8 @@ impl Launcher {
             Intent::Down => {
                 self.selected = (self.selected + 1).min(self.results.len().saturating_sub(1));
             }
-            Intent::Tab => self.select_mode(self.registry.next(self.effective_mode())),
-            Intent::ShiftTab => self.select_mode(self.registry.prev(self.effective_mode())),
+            Intent::Tab => self.select_mode(self.registry.next(self.active)),
+            Intent::ShiftTab => self.select_mode(self.registry.prev(self.active)),
             Intent::Enter => {
                 let action = match self.results.get(self.selected) {
                     Some(item) if item.action != Action::None => item.action.clone(),
@@ -113,37 +113,32 @@ impl Launcher {
         self.active = self.default_mode;
     }
 
-    /// Every mode's name and keyword, in Tab order.
-    pub fn modes(&self) -> Vec<(&str, &str)> {
+    /// Every mode's name, in Tab order.
+    pub fn modes(&self) -> Vec<&str> {
         (0..self.registry.len())
-            .map(|i| (self.registry.mode(i).name(), self.registry.keyword(i)))
+            .map(|i| self.registry.mode(i).name())
             .collect()
     }
 
-    /// Index (into `modes()`) of the mode that answers the current input.
-    pub fn effective_mode(&self) -> usize {
-        self.registry.parse(&self.input, self.active).mode
+    /// Index (into `modes()`) of the mode that answers the input.
+    pub fn active_mode(&self) -> usize {
+        self.active
     }
 
-    /// Makes `index` the active mode, dropping any typed prefix but keeping
-    /// the search text. Panics if `index` is out of range.
+    /// Makes `index` the active mode and searches the same text there.
+    /// Panics if `index` is out of range.
     pub fn select_mode(&mut self, index: usize) {
         assert!(index < self.registry.len(), "no mode {index}");
-        let text = self
-            .registry
-            .parse(&self.input, self.active)
-            .text
-            .to_owned();
         self.active = index;
+        let text = std::mem::take(&mut self.input);
         self.set_input(&text);
     }
 
     fn run_query(&mut self) {
-        let parsed = self.registry.parse(&self.input, self.active);
         self.results = self
             .registry
-            .mode(parsed.mode)
-            .query(parsed.text, self.max_results);
+            .mode(self.active)
+            .query(&self.input, self.max_results);
     }
 }
 
@@ -155,6 +150,9 @@ mod tests {
     use crate::modes::{FilesMode, WebSearchMode};
     use crate::registry::ModeRegistry;
     use std::path::PathBuf;
+
+    const YOUTUBE: usize = 1;
+    const FILES: usize = 2;
 
     fn launcher() -> Launcher {
         let entries = ["report.txt", "resume.pdf", "notes.md"]
@@ -169,24 +167,25 @@ mod tests {
         *index.write().unwrap() = Some(FileIndex { entries });
 
         let mut r = ModeRegistry::new();
-        r.register("g", Box::new(WebSearchMode::google())).unwrap();
-        r.register("yt", Box::new(WebSearchMode::youtube()))
-            .unwrap();
-        r.register("f", Box::new(FilesMode::new(index))).unwrap();
+        r.register(Box::new(WebSearchMode::google()));
+        r.register(Box::new(WebSearchMode::youtube()));
+        r.register(Box::new(FilesMode::new(index)));
         Launcher::new(r, 0, 8)
     }
 
     #[test]
-    fn prefix_shows_effective_mode() {
+    fn typing_a_mode_name_does_not_switch_modes() {
         let mut l = launcher();
         l.set_input("yt lofi");
-        assert_eq!(l.effective_mode_name(), "YouTube");
+        assert_eq!(l.active_mode_name(), "Google");
+        assert_eq!(l.results()[0].title, "Search Google for \"yt lofi\"");
     }
 
     #[test]
     fn enter_runs_selected_then_hides_and_resets() {
         let mut l = launcher();
-        l.set_input("yt lofi");
+        l.select_mode(YOUTUBE);
+        l.set_input("lofi");
         assert_eq!(
             l.handle(Intent::Enter),
             vec![
@@ -196,31 +195,35 @@ mod tests {
                 Effect::Hide
             ]
         );
-        assert_eq!((l.input(), l.effective_mode_name()), ("", "Google"));
+        assert_eq!((l.input(), l.active_mode_name()), ("", "Google"));
     }
 
     #[test]
     fn enter_with_nothing_runnable_does_nothing() {
         let mut l = launcher();
         assert!(l.handle(Intent::Enter).is_empty());
-        l.set_input("f zzzz");
+        l.select_mode(FILES);
+        l.set_input("zzzz");
         assert!(l.handle(Intent::Enter).is_empty());
     }
 
     #[test]
-    fn tab_cycles_and_strips_prefix() {
+    fn tab_cycles_and_keeps_the_text() {
         let mut l = launcher();
-        l.set_input("yt lofi");
+        l.set_input("lofi");
         l.handle(Intent::Tab);
-        assert_eq!((l.input(), l.effective_mode_name()), ("lofi", "Files"));
+        assert_eq!((l.input(), l.active_mode_name()), ("lofi", "YouTube"));
+        l.handle(Intent::Tab);
+        assert_eq!(l.active_mode_name(), "Files");
         l.handle(Intent::ShiftTab);
-        assert_eq!(l.effective_mode_name(), "YouTube");
+        assert_eq!(l.active_mode_name(), "YouTube");
     }
 
     #[test]
     fn arrows_move_and_clamp() {
         let mut l = launcher();
-        l.set_input("f e");
+        l.select_mode(FILES);
+        l.set_input("e");
         assert_eq!(l.results().len(), 3);
         l.handle(Intent::Up);
         assert_eq!(l.selected(), 0);
@@ -228,14 +231,15 @@ mod tests {
             l.handle(Intent::Down);
         }
         assert_eq!(l.selected(), 2);
-        l.set_input("f es");
+        l.set_input("es");
         assert_eq!(l.selected(), 0);
     }
 
     #[test]
     fn select_picks_a_row_and_clamps() {
         let mut l = launcher();
-        l.set_input("f e");
+        l.select_mode(FILES);
+        l.set_input("e");
         l.select(1);
         assert_eq!(l.selected(), 1);
         l.select(99);
@@ -243,35 +247,26 @@ mod tests {
     }
 
     #[test]
-    fn lists_modes_with_keywords_in_tab_order() {
-        assert_eq!(
-            launcher().modes(),
-            vec![("Google", "g"), ("YouTube", "yt"), ("Files", "f")]
-        );
+    fn lists_mode_names_in_tab_order() {
+        assert_eq!(launcher().modes(), vec!["Google", "YouTube", "Files"]);
     }
 
     #[test]
-    fn effective_mode_follows_prefix() {
+    fn select_mode_switches_and_searches_again() {
         let mut l = launcher();
-        assert_eq!(l.effective_mode(), 0);
-        l.set_input("f notes");
-        assert_eq!(l.effective_mode(), 2);
-    }
-
-    #[test]
-    fn select_mode_switches_and_strips_prefix() {
-        let mut l = launcher();
-        l.set_input("yt notes");
-        l.select_mode(2);
-        assert_eq!((l.input(), l.effective_mode_name()), ("notes", "Files"));
+        l.set_input("notes");
+        l.select_mode(FILES);
+        assert_eq!(l.active_mode(), FILES);
+        assert_eq!((l.input(), l.active_mode_name()), ("notes", "Files"));
         assert_eq!(l.results()[0].title, "notes.md");
     }
 
     #[test]
     fn escape_hides_and_resets() {
         let mut l = launcher();
-        l.set_input("g rust");
+        l.select_mode(FILES);
+        l.set_input("rust");
         assert_eq!(l.handle(Intent::Escape), vec![Effect::Hide]);
-        assert_eq!(l.input(), "");
+        assert_eq!((l.input(), l.active_mode()), ("", 0));
     }
 }
