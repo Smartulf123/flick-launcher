@@ -278,6 +278,39 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
+    /// Talks to wallhaven.cc: run by hand with `cargo test -- --ignored live`.
+    #[test]
+    #[ignore]
+    fn live_wallhaven_search_and_thumbnail() {
+        let (tx, rx) = mpsc::channel();
+        let loader = Loader::start(move || {
+            let _ = tx.send(());
+        });
+        let url = wallhaven::search_url("anime", wallhaven::Categories::default(), 1);
+        loader.send(Job::Search { generation: 1, url });
+        rx.recv_timeout(Duration::from_secs(15)).unwrap();
+        let Some(Done::Search { result, .. }) = loader.take_done().pop() else {
+            panic!("expected a search")
+        };
+        let page = result.unwrap();
+        println!(
+            "LIVE {} results, last page {}",
+            page.wallpapers.len(),
+            page.last_page
+        );
+        let first = page.wallpapers[0].clone();
+        loader.send(Job::Thumb {
+            generation: 1,
+            id: first.id.clone(),
+            url: first.thumb_url,
+        });
+        rx.recv_timeout(Duration::from_secs(15)).unwrap();
+        let Some(Done::Thumb { image, .. }) = loader.take_done().pop() else {
+            panic!("expected a thumbnail")
+        };
+        println!("LIVE thumbnail {:?}", image.unwrap().size);
+    }
+
     #[test]
     fn search_jobs_come_back_parsed() {
         let reply = r#"{"data":[{"id":"x1","url":"p","purity":"sfw","resolution":"1x1","path":"f","thumbs":{"small":"t"}}],"meta":{"current_page":1,"last_page":2}}"#;

@@ -77,14 +77,17 @@ impl Gallery {
         }
     }
 
+    #[cfg(test)]
     pub fn results(&self) -> &[Wallpaper] {
         &self.results
     }
 
+    #[cfg(test)]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
 
+    #[cfg(test)]
     pub fn is_loading(&self) -> bool {
         self.loading
     }

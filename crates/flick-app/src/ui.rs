@@ -15,6 +15,8 @@ use flick_core::mode::{Action, ResultItem, ResultKind};
 use global_hotkey::GlobalHotKeyManager;
 
 use crate::actions::run_action;
+use crate::gallery::{Gallery, GalleryAction, Pick};
+use crate::gallery_loader::{Done, Job, Loader};
 use crate::icons::Icon;
 use crate::shell_icons::IconCache;
 use crate::theme::{self, KANAGAWA, Palette};
@@ -28,6 +30,9 @@ pub const START_HEIGHT: f32 = 120.0;
 /// Space around and between the cards, where the picture shows.
 const GAP: i8 = 10;
 const ICON_SIZE: f32 = 20.0;
+/// The window's size while the background gallery is open.
+const GALLERY_WIDTH: f32 = 960.0;
+const GALLERY_HEIGHT: f32 = 640.0;
 
 /// Tray clicks waiting for the event-loop thread.
 pub type TrayQueue = Arc<Mutex<Vec<TrayCommand>>>;
@@ -46,6 +51,8 @@ pub struct Services {
     pub tray_queue: TrayQueue,
     /// Starts a file index rebuild.
     pub reindex: Box<dyn Fn()>,
+    /// Background workers for the gallery (search, thumbnails, downloads).
+    pub loader: Loader,
 }
 
 /// The config as loaded, and where to save changes made from the tray.
@@ -73,8 +80,10 @@ pub struct FlickApp {
     was_focused: bool,
     /// Whether the window has been moved to its opening spot yet.
     positioned: bool,
-    /// The search box was right-clicked; open the Theme and Background menu.
+    /// The search box was right-clicked; open the background menu.
     wants_bar_menu: bool,
+    /// The background gallery, while it is open.
+    gallery: Option<Gallery>,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -109,6 +118,7 @@ impl FlickApp {
             was_focused: false,
             positioned: false,
             wants_bar_menu: false,
+            gallery: None,
         }
     }
 
@@ -188,8 +198,147 @@ impl FlickApp {
         true
     }
 
-    fn open_gallery(&mut self, _ctx: &egui::Context) {
-        log::info!("gallery not yet");
+    /// Turns the window into the gallery: larger, centered on where the bar
+    /// was, kept on screen, and shown (it may be opened from the tray).
+    fn open_gallery(&mut self, ctx: &egui::Context) {
+        if self.gallery.is_some() {
+            return;
+        }
+        self.gallery = Some(Gallery::new(paths::backgrounds_dir()));
+        self.launcher.reset();
+        self.pending.clear();
+        self.height = GALLERY_HEIGHT;
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
+            GALLERY_WIDTH,
+            GALLERY_HEIGHT,
+        )));
+        let (outer, monitor) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size));
+        if let Some(outer) = outer {
+            let top = monitor
+                .and_then(|m| placement::keep_on_screen(outer.top(), GALLERY_HEIGHT, m.y))
+                .unwrap_or(outer.top());
+            let left = (outer.left() - (GALLERY_WIDTH - WIDTH) / 2.0).max(0.0);
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(left, top)));
+        }
+        self.services.window.show_and_focus();
+    }
+
+    /// Back to the search bar at its usual width.
+    fn close_gallery(&mut self, ctx: &egui::Context) {
+        if self.gallery.take().is_none() {
+            return;
+        }
+        self.height = START_HEIGHT;
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, START_HEIGHT)));
+        if let Some(outer) = ctx.input(|i| i.viewport().outer_rect) {
+            let left = outer.left() + (GALLERY_WIDTH - WIDTH) / 2.0;
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(
+                left,
+                outer.top(),
+            )));
+        }
+    }
+
+    /// A finished search, thumbnail or download from the loader.
+    fn handle_loaded(&mut self, ctx: &egui::Context, done: Done) {
+        match done {
+            Done::Downloaded { id, result } => {
+                let ok = match result {
+                    Ok(path) => self.use_background(ctx, BackgroundSource::File(path)),
+                    Err(e) => {
+                        log::error!("download of wallhaven {id}: {e:#}");
+                        false
+                    }
+                };
+                if let Some(gallery) = &mut self.gallery {
+                    if ok {
+                        gallery.note_downloaded();
+                    } else {
+                        gallery.note_download_failed();
+                    }
+                }
+            }
+            other => {
+                if let Some(gallery) = &mut self.gallery {
+                    for job in gallery.apply(ctx, other) {
+                        self.services.loader.send(job);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The gallery view: drawn instead of the bar while it is open.
+    fn gallery_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.close_gallery(ctx);
+            return;
+        }
+        let window = ui.max_rect();
+        self.paint_background(ui, window);
+        let mover = ui.interact(
+            window,
+            ui.scope_id().with("move gallery"),
+            egui::Sense::drag(),
+        );
+        if mover.drag_started() {
+            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        }
+
+        let p = self.palette;
+        let current = BackgroundSource::from_setting(&self.settings.config.appearance.background);
+        let Some(gallery) = self.gallery.as_mut() else {
+            return;
+        };
+        let action = egui::Frame::NONE
+            .inner_margin(egui::Margin::same(GAP))
+            .show(ui, |ui| {
+                egui::Frame::NONE
+                    .fill(theme::card_fill(p, 0.85))
+                    .stroke(egui::Stroke::new(1.0, p.border))
+                    .corner_radius(14)
+                    .inner_margin(egui::Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.set_height(ui.available_height());
+                        gallery.show(ui, p, &current)
+                    })
+                    .inner
+            })
+            .inner;
+        match action {
+            GalleryAction::None => {}
+            GalleryAction::Back => self.close_gallery(ctx),
+            GalleryAction::Pick(Pick::Source(source)) => {
+                if !self.use_background(ctx, source) {
+                    log::error!("could not open the picked background");
+                }
+            }
+            GalleryAction::Pick(Pick::Download(wallpaper)) => {
+                self.services.loader.send(Job::Download {
+                    wallpaper,
+                    dir: paths::backgrounds_dir(),
+                });
+            }
+            GalleryAction::Jobs(jobs) => {
+                for job in jobs {
+                    self.services.loader.send(job);
+                }
+            }
+        }
+    }
+
+    /// The background picture (cropped to fill), or the plain theme color.
+    fn paint_background(&self, ui: &egui::Ui, window: egui::Rect) {
+        match &self.picture {
+            Some(picture) => {
+                let uv = background::cover_uv(picture.size(), window.size());
+                ui.painter().image(picture.id(), window, uv, Color32::WHITE);
+            }
+            None => {
+                ui.painter().rect_filled(window, 0, self.palette.background);
+            }
+        }
     }
 
     /// Draws the two cards. Returns the effects of a mouse click on a result.
@@ -469,6 +618,9 @@ impl eframe::App for FlickApp {
         for command in commands {
             self.handle_tray(ctx, command);
         }
+        for done in self.services.loader.take_done() {
+            self.handle_loaded(ctx, done);
+        }
         if !self.positioned
             && let Some(monitor) = ctx.input(|i| i.viewport().monitor_size)
         {
@@ -486,7 +638,8 @@ impl eframe::App for FlickApp {
             self.launcher.refresh();
         }
         let focused = ctx.input(|i| i.viewport().focused) == Some(true);
-        if self.was_focused && !focused {
+        // The gallery stays open when another window is clicked.
+        if self.gallery.is_none() && self.was_focused && !focused {
             self.hide();
         }
         self.was_focused = focused;
@@ -494,6 +647,10 @@ impl eframe::App for FlickApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.gallery.is_some() {
+            self.gallery_ui(ui, &ctx);
+            return;
+        }
         let keys = read_intents(&ctx);
         self.pending.extend(keys.intents);
         if keys.after_text {
@@ -512,15 +669,7 @@ impl eframe::App for FlickApp {
         }
 
         let window = ui.max_rect();
-        match &self.picture {
-            Some(picture) => {
-                let uv = background::cover_uv(picture.size(), window.size());
-                ui.painter().image(picture.id(), window, uv, Color32::WHITE);
-            }
-            None => {
-                ui.painter().rect_filled(window, 0, self.palette.background);
-            }
-        }
+        self.paint_background(ui, window);
 
         // Dragging anywhere that is not a text box or a row moves the window.
         // Added before the cards, so the cards' own widgets win their clicks.

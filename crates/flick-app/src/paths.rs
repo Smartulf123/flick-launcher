@@ -26,6 +26,11 @@ pub fn log_path() -> PathBuf {
     flick_dir().join("flick.log")
 }
 
+/// `%APPDATA%\flick\backgrounds`, where pictures picked online are saved.
+pub fn backgrounds_dir() -> PathBuf {
+    flick_dir().join("backgrounds")
+}
+
 /// Desktop, Documents and Downloads as Windows reports them, so folders
 /// redirected to OneDrive are found. Folders that cannot be resolved are left out.
 pub fn default_roots() -> Vec<PathBuf> {
@@ -63,6 +68,7 @@ mod tests {
         let appdata = PathBuf::from(std::env::var_os("APPDATA").unwrap());
         assert_eq!(config_path(), appdata.join("flick").join("config.toml"));
         assert_eq!(log_path(), appdata.join("flick").join("flick.log"));
+        assert_eq!(backgrounds_dir(), appdata.join("flick").join("backgrounds"));
     }
 
     #[test]

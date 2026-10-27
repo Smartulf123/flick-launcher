@@ -4,9 +4,7 @@ mod actions;
 mod autostart;
 mod background;
 mod builtin_backgrounds;
-#[expect(dead_code, reason = "wired into the window in the next task")]
 mod gallery;
-#[expect(dead_code, reason = "wired into the window in a later task")]
 mod gallery_loader;
 mod hotkey;
 mod http;
@@ -19,10 +17,6 @@ mod suggest_fetch;
 mod theme;
 mod tray;
 mod ui;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the gallery loader (next task)")
-)]
 mod wallhaven;
 mod window;
 
@@ -226,6 +220,10 @@ fn main() -> eframe::Result {
                 tray_queue,
                 reindex: Box::new(move || {
                     reindexer.run();
+                }),
+                loader: gallery_loader::Loader::start({
+                    let ctx = ctx.clone();
+                    move || ctx.request_repaint()
                 }),
             };
             let settings = ui::Settings {
