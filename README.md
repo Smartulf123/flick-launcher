@@ -25,7 +25,7 @@ Needs Rust 1.95 or newer and the Visual Studio C++ build tools (for the linker).
 cargo build --release
 ```
 
-Run `target\release\flick.exe`. Nothing appears until you press the hotkey (Alt+Space by default).
+Run `target\release\flick.exe`. Nothing appears until you press the hotkey (Alt+Space by default). The first run adds Flick to your startup list, so it is ready after every restart; untick **Start with Windows** in the tray menu to stop that.
 
 ## Configuration
 
