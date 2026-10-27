@@ -12,11 +12,11 @@ The mode chips at the top show where you are. Tab and Shift+Tab switch modes, ty
 
 Click the gear at the top right of the bar (or right-click the bar, or use the tray's Background menu):
 
-- **Browse backgrounds...** opens the gallery inside the bar's window. **Built-in** has six public-domain pictures that ship with Flick; **Downloaded** has pictures you picked before; **Search online** searches [wallhaven.cc](https://wallhaven.cc) (safe-for-work only, always), and more pictures load as you scroll. Click a picture to use it; Esc or **Back** returns to the bar.
+- **Browse backgrounds...** opens the gallery inside the bar's window. **Built-in** has six public-domain pictures that ship with Flick; **Favorites** has pictures you kept; **Search online** searches [wallhaven.cc](https://wallhaven.cc) (safe-for-work only, always), and more pictures load as you scroll. Click a picture to use it as the background; tap the heart in its corner to keep it under Favorites (tap again to remove it). Esc or **Back** returns to the bar.
 - **Choose your own picture...** uses any JPG, PNG or WebP on your PC.
 - **None** shows the plain Kanagawa background.
 
-Pictures picked online are downloaded once, scaled to 1280 px wide, and kept in `%APPDATA%\flick\backgrounds`.
+Online pictures are scaled to 1280 px wide. Favorites are kept in `%APPDATA%\flick\backgrounds`; pictures you only clicked wait in `%APPDATA%\flick\cache` and are deleted when the gallery closes (except the one in use).
 
 ## Rust only
 

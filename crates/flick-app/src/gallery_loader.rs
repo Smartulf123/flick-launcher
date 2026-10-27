@@ -44,10 +44,11 @@ pub enum Job {
         id: String,
         url: String,
     },
+    /// `pick` is `None` for a favorite: saved, but not made the background.
     Download {
         wallpaper: Wallpaper,
         dir: PathBuf,
-        pick: u64,
+        pick: Option<u64>,
     },
 }
 
@@ -63,7 +64,7 @@ pub enum Done {
     },
     Downloaded {
         id: String,
-        pick: u64,
+        pick: Option<u64>,
         result: anyhow::Result<PathBuf>,
     },
 }
@@ -272,16 +273,35 @@ mod tests {
             Job::Download {
                 wallpaper: wallpaper("abc"),
                 dir: dir.path().to_path_buf(),
-                pick: 1,
+                pick: Some(1),
             },
         );
         let Done::Downloaded { id, pick, result } = done else {
             panic!("expected a download")
         };
         let path = result.unwrap();
-        assert_eq!((id.as_str(), pick), ("abc", 1));
+        assert_eq!((id.as_str(), pick), ("abc", Some(1)));
         assert_eq!(path, dir.path().join("wallhaven-abc.jpg"));
         assert_eq!(crate::background::load(&path).unwrap().size, [4, 2]);
+    }
+
+    #[test]
+    fn a_favorite_download_is_saved_without_a_pick() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = png_bytes();
+        let done = run_one(
+            move |_| Ok(bytes.clone()),
+            Job::Download {
+                wallpaper: wallpaper("fav"),
+                dir: dir.path().to_path_buf(),
+                pick: None,
+            },
+        );
+        let Done::Downloaded { pick, result, .. } = done else {
+            panic!("expected a download")
+        };
+        assert_eq!(pick, None);
+        assert!(result.unwrap().is_file());
     }
 
     #[test]
@@ -292,7 +312,7 @@ mod tests {
             Job::Download {
                 wallpaper: wallpaper("abc"),
                 dir: dir.path().join("backgrounds"),
-                pick: 1,
+                pick: Some(1),
             },
         );
         let Done::Downloaded { result, .. } = done else {
@@ -315,7 +335,7 @@ mod tests {
             Job::Download {
                 wallpaper: wallpaper("abc"),
                 dir: dir.path().to_path_buf(),
-                pick: 1,
+                pick: Some(1),
             },
         );
         let Done::Downloaded { result, .. } = done else {

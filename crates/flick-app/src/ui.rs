@@ -21,6 +21,7 @@ use crate::icons::Icon;
 use crate::shell_icons::IconCache;
 use crate::theme::{self, KANAGAWA, Palette};
 use crate::tray::{BackgroundChoice, Tray, TrayCommand};
+use crate::wallhaven::{self, Wallpaper};
 use crate::window::WindowHandle;
 use crate::{autostart, background, paths, placement};
 
@@ -228,6 +229,7 @@ impl FlickApp {
         }
         self.gallery = Some(Gallery::new(
             paths::backgrounds_dir(),
+            paths::cache_dir(),
             self.services.loader.generations(),
         ));
         self.launcher.reset();
@@ -256,6 +258,15 @@ impl FlickApp {
         }
         // Searches and thumbnails still queued are no longer wanted.
         self.services.loader.generations().next();
+        // Previews only live while the gallery is open; keep the one in use.
+        let in_use =
+            match BackgroundSource::from_setting(&self.settings.config.appearance.background) {
+                BackgroundSource::File(path) => Some(path),
+                _ => None,
+            };
+        for stale in crate::gallery::stale_previews(&paths::cache_dir(), in_use.as_deref()) {
+            let _ = std::fs::remove_file(stale);
+        }
         self.height = START_HEIGHT;
         ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, START_HEIGHT)));
@@ -268,18 +279,19 @@ impl FlickApp {
     fn handle_loaded(&mut self, ctx: &egui::Context, done: Done) {
         match done {
             Done::Downloaded { id, pick, result } => {
-                let ok = match result {
-                    // Saved either way; only the latest choice becomes the background.
-                    Ok(_) if !self.picks.is_latest(pick) => true,
-                    Ok(path) => self.use_background(ctx, BackgroundSource::File(path)),
-                    Err(e) => {
+                let ok = match (result, pick) {
+                    // A favorite, or an older preview: saved, not shown.
+                    (Ok(_), None) => true,
+                    (Ok(_), Some(pick)) if !self.picks.is_latest(pick) => true,
+                    (Ok(path), Some(_)) => self.use_background(ctx, BackgroundSource::File(path)),
+                    (Err(e), _) => {
                         log::error!("download of wallhaven {id}: {e:#}");
                         false
                     }
                 };
                 if let Some(gallery) = &mut self.gallery {
                     if ok {
-                        gallery.note_downloaded();
+                        gallery.note_saved();
                     } else {
                         gallery.note_download_failed();
                     }
@@ -346,15 +358,78 @@ impl FlickApp {
                 let pick = self.picks.next();
                 self.services.loader.send(Job::Download {
                     wallpaper,
-                    dir: paths::backgrounds_dir(),
-                    pick,
+                    dir: paths::cache_dir(),
+                    pick: Some(pick),
                 });
+            }
+            GalleryAction::Favorite(wallpaper) => self.add_favorite(wallpaper),
+            GalleryAction::Unfavorite(path) => {
+                self.remove_favorite(&path);
+                if let Some(gallery) = &mut self.gallery {
+                    gallery.note_saved();
+                }
             }
             GalleryAction::Jobs(jobs) => {
                 for job in jobs {
                     self.services.loader.send(job);
                 }
             }
+        }
+    }
+
+    /// Keeps an online picture under Favorites: copies the preview if there
+    /// is one, else downloads it without changing the background.
+    fn add_favorite(&mut self, wallpaper: Wallpaper) {
+        let favorites = paths::backgrounds_dir();
+        let cached = wallhaven::download_path(&paths::cache_dir(), &wallpaper.id)
+            .filter(|path| path.is_file());
+        let target = wallhaven::download_path(&favorites, &wallpaper.id);
+        if let (Some(cached), Some(target)) = (cached, target) {
+            // Move the preview over; if it is the background, follow it.
+            let moved = std::fs::create_dir_all(&favorites)
+                .and_then(|()| std::fs::rename(&cached, &target));
+            match moved {
+                Ok(()) => {
+                    let background = &mut self.settings.config.appearance.background;
+                    if *background == BackgroundSource::File(cached).to_setting() {
+                        *background = BackgroundSource::File(target).to_setting();
+                        self.save_settings();
+                    }
+                }
+                Err(e) => log::error!("could not save favorite: {e}"),
+            }
+            if let Some(gallery) = &mut self.gallery {
+                gallery.note_saved();
+            }
+        } else {
+            self.services.loader.send(Job::Download {
+                wallpaper,
+                dir: favorites,
+                pick: None,
+            });
+        }
+    }
+
+    /// Removes a picture from Favorites. If it is the background in use, it
+    /// moves to the cache instead, so the background keeps working.
+    fn remove_favorite(&mut self, path: &std::path::Path) {
+        let in_use = BackgroundSource::from_setting(&self.settings.config.appearance.background)
+            == BackgroundSource::File(path.to_path_buf());
+        let result = match (in_use, path.file_name()) {
+            (true, Some(name)) => {
+                let moved = paths::cache_dir().join(name);
+                std::fs::create_dir_all(paths::cache_dir())
+                    .and_then(|()| std::fs::rename(path, &moved))
+                    .map(|()| {
+                        self.settings.config.appearance.background =
+                            BackgroundSource::File(moved).to_setting();
+                        self.save_settings();
+                    })
+            }
+            _ => std::fs::remove_file(path),
+        };
+        if let Err(e) = result {
+            log::error!("could not remove favorite {}: {e}", path.display());
         }
     }
 

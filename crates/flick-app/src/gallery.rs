@@ -10,6 +10,7 @@ use flick_core::config::BackgroundSource;
 use crate::background;
 use crate::builtin_backgrounds::{BUILTINS, Builtin};
 use crate::gallery_loader::{Done, Generations, Job};
+use crate::icons::paint_heart;
 use crate::theme::Palette;
 use crate::wallhaven::{self, Categories, Wallpaper};
 
@@ -21,7 +22,7 @@ const THUMB_WIDTH: u32 = 360;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Builtin,
-    Downloaded,
+    Favorites,
     Online,
 }
 
@@ -29,7 +30,7 @@ pub enum Tab {
 pub enum Pick {
     /// Use this right away.
     Source(BackgroundSource),
-    /// Download this Wallhaven picture first.
+    /// Preview this Wallhaven picture (download it into the cache first).
     Download(Wallpaper),
 }
 
@@ -37,6 +38,10 @@ pub enum GalleryAction {
     None,
     Back,
     Pick(Pick),
+    /// Keep this online picture under Favorites.
+    Favorite(Wallpaper),
+    /// Remove this picture from Favorites.
+    Unfavorite(PathBuf),
     Jobs(Vec<Job>),
 }
 
@@ -68,14 +73,15 @@ pub struct Gallery {
     loading: bool,
     error: Option<String>,
     downloading: Option<String>,
-    downloads_dir: PathBuf,
+    favorites_dir: PathBuf,
+    cache_dir: PathBuf,
     online_thumbs: HashMap<String, TextureHandle>,
     builtin_thumbs: Option<Vec<Option<TextureHandle>>>,
-    downloaded: Option<Vec<(PathBuf, Option<TextureHandle>)>>,
+    favorites: Option<Vec<(PathBuf, Option<TextureHandle>)>>,
 }
 
 impl Gallery {
-    pub fn new(downloads_dir: PathBuf, generations: Generations) -> Self {
+    pub fn new(favorites_dir: PathBuf, cache_dir: PathBuf, generations: Generations) -> Self {
         Self {
             generations,
             tab: Tab::Builtin,
@@ -88,10 +94,11 @@ impl Gallery {
             loading: false,
             error: None,
             downloading: None,
-            downloads_dir,
+            favorites_dir,
+            cache_dir,
             online_thumbs: HashMap::new(),
             builtin_thumbs: None,
-            downloaded: None,
+            favorites: None,
         }
     }
 
@@ -181,10 +188,10 @@ impl Gallery {
         }
     }
 
-    /// A download finished; it now shows under Downloaded.
-    pub fn note_downloaded(&mut self) {
+    /// A download or a favorites change finished; Favorites is re-read.
+    pub fn note_saved(&mut self) {
         self.downloading = None;
-        self.downloaded = None;
+        self.favorites = None;
     }
 
     pub fn note_download_failed(&mut self) {
@@ -207,7 +214,7 @@ impl Gallery {
             ui.add_space(12.0);
             for (tab, label) in [
                 (Tab::Builtin, "Built-in"),
-                (Tab::Downloaded, "Downloaded"),
+                (Tab::Favorites, "Favorites"),
                 (Tab::Online, "Search online"),
             ] {
                 if ui.selectable_label(self.tab == tab, label).clicked() && self.tab != tab {
@@ -244,15 +251,17 @@ impl Gallery {
             .show(ui, |ui| {
                 let picked = match self.tab {
                     Tab::Builtin => self.builtin_grid(ui, p, current),
-                    Tab::Downloaded => self.downloaded_grid(ui, p, current),
+                    Tab::Favorites => self.favorites_grid(ui, p, current),
                     Tab::Online => self.online_grid(ui, p, current),
                 };
-                if let Some(pick) = picked {
-                    if let Pick::Download(w) = &pick {
+                if let Some(picked) = picked {
+                    if let GalleryAction::Pick(Pick::Download(w)) | GalleryAction::Favorite(w) =
+                        &picked
+                    {
                         self.downloading = Some(w.id.clone());
                         self.error = None;
                     }
-                    action = GalleryAction::Pick(pick);
+                    action = picked;
                 }
                 if self.tab == Tab::Online {
                     // Scrolling near the end loads the next page by itself.
@@ -293,7 +302,7 @@ impl Gallery {
         ui: &mut egui::Ui,
         p: &Palette,
         current: &BackgroundSource,
-    ) -> Option<Pick> {
+    ) -> Option<GalleryAction> {
         let ctx = ui.ctx().clone();
         let thumbs = self.builtin_thumbs.get_or_insert_with(|| {
             BUILTINS
@@ -309,23 +318,25 @@ impl Gallery {
         grid(ui, cards.len(), |ui, i, size| {
             let (b, texture) = cards[i];
             let is_current = *current == BackgroundSource::Builtin(b.id.into());
-            let response = card(ui, p, size, texture, is_current);
+            let (response, _) = card(ui, p, size, texture, is_current, None);
             if response.clicked() {
-                picked = Some(Pick::Source(BackgroundSource::Builtin(b.id.into())));
+                picked = Some(GalleryAction::Pick(Pick::Source(
+                    BackgroundSource::Builtin(b.id.into()),
+                )));
             }
         });
         picked
     }
 
-    fn downloaded_grid(
+    fn favorites_grid(
         &mut self,
         ui: &mut egui::Ui,
         p: &Palette,
         current: &BackgroundSource,
-    ) -> Option<Pick> {
+    ) -> Option<GalleryAction> {
         let ctx = ui.ctx().clone();
-        let dir = self.downloads_dir.clone();
-        let files = self.downloaded.get_or_insert_with(|| {
+        let dir = self.favorites_dir.clone();
+        let files = self.favorites.get_or_insert_with(|| {
             list_downloaded(&dir)
                 .into_iter()
                 .map(|path| {
@@ -338,7 +349,8 @@ impl Gallery {
         });
         if files.is_empty() {
             ui.label(
-                RichText::new("Pictures you pick under Search online show up here.").color(p.muted),
+                RichText::new("Tap the heart on a picture under Search online to keep it here.")
+                    .color(p.muted),
             );
             return None;
         }
@@ -346,8 +358,13 @@ impl Gallery {
         grid(ui, files.len(), |ui, i, size| {
             let (path, texture) = &files[i];
             let is_current = *current == BackgroundSource::File(path.clone());
-            if card(ui, p, size, texture.as_ref(), is_current).clicked() {
-                picked = Some(Pick::Source(BackgroundSource::File(path.clone())));
+            let (response, heart) = card(ui, p, size, texture.as_ref(), is_current, Some(true));
+            if heart {
+                picked = Some(GalleryAction::Unfavorite(path.clone()));
+            } else if response.clicked() {
+                picked = Some(GalleryAction::Pick(Pick::Source(BackgroundSource::File(
+                    path.clone(),
+                ))));
             }
         });
         picked
@@ -358,27 +375,58 @@ impl Gallery {
         ui: &mut egui::Ui,
         p: &Palette,
         current: &BackgroundSource,
-    ) -> Option<Pick> {
+    ) -> Option<GalleryAction> {
         let mut picked = None;
         let results = &self.results;
         let thumbs = &self.online_thumbs;
-        let dir = &self.downloads_dir;
+        let (favorites, cache) = (&self.favorites_dir, &self.cache_dir);
         grid(ui, results.len(), |ui, i, size| {
             let w = &results[i];
-            let saved = wallhaven::download_path(dir, &w.id).filter(|path| path.is_file());
+            let favorite = wallhaven::download_path(favorites, &w.id).filter(|f| f.is_file());
+            let saved = saved_copy(favorites, cache, &w.id);
             let is_current = saved
                 .as_ref()
                 .is_some_and(|path| *current == BackgroundSource::File(path.clone()));
-            let response = card(ui, p, size, thumbs.get(&w.id), is_current);
-            if response.clicked() {
-                picked = Some(match saved {
+            let (response, heart) = card(
+                ui,
+                p,
+                size,
+                thumbs.get(&w.id),
+                is_current,
+                Some(favorite.is_some()),
+            );
+            if heart {
+                picked = Some(match favorite {
+                    Some(path) => GalleryAction::Unfavorite(path),
+                    None => GalleryAction::Favorite(w.clone()),
+                });
+            } else if response.clicked() {
+                picked = Some(GalleryAction::Pick(match saved {
                     Some(path) => Pick::Source(BackgroundSource::File(path)),
                     None => Pick::Download(w.clone()),
-                });
+                }));
             }
         });
         picked
     }
+}
+
+/// A copy of Wallhaven picture `id` already on this PC: the favorite if
+/// there is one, else a preview in the cache.
+pub fn saved_copy(favorites: &Path, cache: &Path, id: &str) -> Option<PathBuf> {
+    [favorites, cache]
+        .into_iter()
+        .filter_map(|dir| wallhaven::download_path(dir, id))
+        .find(|path| path.is_file())
+}
+
+/// Previewed pictures in `cache` to delete when the gallery closes; the
+/// background in use (`keep`) stays.
+pub fn stale_previews(cache: &Path, keep: Option<&Path>) -> Vec<PathBuf> {
+    list_downloaded(cache)
+        .into_iter()
+        .filter(|path| Some(path.as_path()) != keep)
+        .collect()
 }
 
 /// Lays out `count` cards in rows of `COLUMNS`, calling `draw(ui, index, size)`.
@@ -398,14 +446,17 @@ fn grid(ui: &mut egui::Ui, count: usize, mut draw: impl FnMut(&mut egui::Ui, usi
 }
 
 /// One picture card: the picture cropped to fill, an accent outline when
-/// it is the current background.
+/// it is the current background, and (for online and favorite pictures) a
+/// heart in the corner. Returns the card's response and whether the heart
+/// was clicked.
 fn card(
     ui: &mut egui::Ui,
     p: &Palette,
     size: egui::Vec2,
     texture: Option<&TextureHandle>,
     is_current: bool,
-) -> egui::Response {
+    heart: Option<bool>,
+) -> (egui::Response, bool) {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter_at(rect);
     match texture {
@@ -431,7 +482,22 @@ fn card(
     };
     ui.painter()
         .rect_stroke(rect, 10, outline, egui::StrokeKind::Inside);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let mut heart_clicked = false;
+    if let Some(filled) = heart {
+        // Added after the card, so it takes clicks on top of it.
+        let spot = egui::Rect::from_min_size(rect.right_top() + vec2(-34.0, 6.0), vec2(28.0, 28.0));
+        let heart_response = ui.interact(spot, response.id.with("heart"), Sense::click());
+        ui.painter()
+            .circle_filled(spot.center(), 14.0, Color32::from_black_alpha(130));
+        paint_heart(ui.painter(), spot.shrink(6.0), filled);
+        heart_clicked = heart_response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked();
+    }
+    (
+        response.on_hover_cursor(egui::CursorIcon::PointingHand),
+        heart_clicked,
+    )
 }
 
 /// How close (in points) the end of the grid must come into view before
@@ -509,7 +575,7 @@ mod tests {
 
     #[test]
     fn new_search_ignores_late_results_from_the_old_one() {
-        let mut g = Gallery::new(tmp(), Generations::default());
+        let mut g = Gallery::new(tmp(), tmp(), Generations::default());
         g.start_search();
         g.start_search(); // generation 2
         g.apply(
@@ -537,7 +603,7 @@ mod tests {
     #[test]
     fn reopened_gallery_ignores_replies_from_the_closed_one() {
         let generations = Generations::default();
-        let mut first = Gallery::new(tmp(), generations.clone());
+        let mut first = Gallery::new(tmp(), tmp(), generations.clone());
         let Job::Search {
             generation: old, ..
         } = first.start_search()
@@ -545,7 +611,7 @@ mod tests {
             panic!("expected a search")
         };
         drop(first);
-        let mut second = Gallery::new(tmp(), generations);
+        let mut second = Gallery::new(tmp(), tmp(), generations);
         second.start_search();
         second.apply(
             &ctx(),
@@ -568,7 +634,7 @@ mod tests {
 
     #[test]
     fn offline_shows_cant_reach_and_stops_loading() {
-        let mut g = Gallery::new(tmp(), Generations::default());
+        let mut g = Gallery::new(tmp(), tmp(), Generations::default());
         g.start_search();
         g.apply(
             &ctx(),
@@ -583,7 +649,7 @@ mod tests {
 
     #[test]
     fn load_more_asks_for_the_next_page_and_appends() {
-        let mut g = Gallery::new(tmp(), Generations::default());
+        let mut g = Gallery::new(tmp(), tmp(), Generations::default());
         g.start_search();
         g.apply(
             &ctx(),
@@ -622,7 +688,7 @@ mod tests {
 
     #[test]
     fn no_more_pages_after_the_last() {
-        let mut g = Gallery::new(tmp(), Generations::default());
+        let mut g = Gallery::new(tmp(), tmp(), Generations::default());
         g.start_search();
         g.apply(
             &ctx(),
@@ -652,6 +718,38 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["wallhaven-b.jpg", "wallhaven-a.jpg"]);
+    }
+
+    #[test]
+    fn saved_copy_prefers_favorites_then_previews() {
+        let favorites = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        assert_eq!(saved_copy(favorites.path(), cache.path(), "a1"), None);
+        std::fs::write(cache.path().join("wallhaven-a1.jpg"), b"x").unwrap();
+        assert_eq!(
+            saved_copy(favorites.path(), cache.path(), "a1"),
+            Some(cache.path().join("wallhaven-a1.jpg"))
+        );
+        std::fs::write(favorites.path().join("wallhaven-a1.jpg"), b"x").unwrap();
+        assert_eq!(
+            saved_copy(favorites.path(), cache.path(), "a1"),
+            Some(favorites.path().join("wallhaven-a1.jpg"))
+        );
+    }
+
+    #[test]
+    fn closing_removes_previews_except_the_background_in_use() {
+        let cache = tempfile::tempdir().unwrap();
+        for name in ["wallhaven-a.jpg", "wallhaven-b.jpg", "wallhaven-c.jpg"] {
+            std::fs::write(cache.path().join(name), b"x").unwrap();
+        }
+        let in_use = cache.path().join("wallhaven-b.jpg");
+        let mut stale: Vec<_> = stale_previews(cache.path(), Some(&in_use))
+            .into_iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        stale.sort();
+        assert_eq!(stale, ["wallhaven-a.jpg", "wallhaven-c.jpg"]);
     }
 
     #[test]

@@ -31,6 +31,12 @@ pub fn backgrounds_dir() -> PathBuf {
     flick_dir().join("backgrounds")
 }
 
+/// `%APPDATA%\flick\cache`, where previewed online pictures wait until the
+/// gallery closes.
+pub fn cache_dir() -> PathBuf {
+    flick_dir().join("cache")
+}
+
 /// Desktop, Documents and Downloads as Windows reports them, so folders
 /// redirected to OneDrive are found. Folders that cannot be resolved are left out.
 pub fn default_roots() -> Vec<PathBuf> {
@@ -69,6 +75,7 @@ mod tests {
         assert_eq!(config_path(), appdata.join("flick").join("config.toml"));
         assert_eq!(log_path(), appdata.join("flick").join("flick.log"));
         assert_eq!(backgrounds_dir(), appdata.join("flick").join("backgrounds"));
+        assert_eq!(cache_dir(), appdata.join("flick").join("cache"));
     }
 
     #[test]

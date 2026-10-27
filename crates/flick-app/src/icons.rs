@@ -24,6 +24,40 @@ const GOOGLE_YELLOW: Color32 = Color32::from_rgb(0xfb, 0xbc, 0x05);
 const GOOGLE_RED: Color32 = Color32::from_rgb(0xea, 0x43, 0x35);
 const YOUTUBE_RED: Color32 = Color32::from_rgb(0xff, 0x00, 0x00);
 
+/// A heart in `rect`: filled red when `filled`, else a white outline.
+pub fn paint_heart(painter: &Painter, rect: Rect, filled: bool) {
+    let s = rect.width().min(rect.height());
+    let r = Rect::from_center_size(rect.center(), vec2(s, s));
+    let at = |x: f32, y: f32| pos2(r.left() + x * s, r.top() + y * s);
+    if filled {
+        let red = Color32::from_rgb(0xe5, 0x48, 0x4d);
+        painter.circle_filled(at(0.33, 0.38), s * 0.2, red);
+        painter.circle_filled(at(0.67, 0.38), s * 0.2, red);
+        painter.add(Shape::convex_polygon(
+            vec![at(0.14, 0.45), at(0.86, 0.45), at(0.5, 0.86)],
+            red,
+            Stroke::NONE,
+        ));
+    } else {
+        // The classic heart curve, scaled into the square.
+        let points: Vec<Pos2> = (0..48)
+            .map(|i| {
+                let t = i as f32 / 48.0 * std::f32::consts::TAU;
+                let x = 16.0 * t.sin().powi(3);
+                let y = 13.0 * t.cos()
+                    - 5.0 * (2.0 * t).cos()
+                    - 2.0 * (3.0 * t).cos()
+                    - (4.0 * t).cos();
+                at(0.5 + x / 40.0, 0.48 - y / 40.0)
+            })
+            .collect();
+        painter.add(Shape::closed_line(
+            points,
+            Stroke::new(s * 0.08, Color32::WHITE),
+        ));
+    }
+}
+
 /// Points along a circle from `start` to `end` degrees (0 = right, clockwise).
 fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
     let steps = ((end - start).abs() / 6.0).ceil().max(2.0) as usize;
