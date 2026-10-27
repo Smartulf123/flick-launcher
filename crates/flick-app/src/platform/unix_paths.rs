@@ -88,6 +88,17 @@ mod tests {
         );
     }
 
+    /// Never the shared temp folder: another user could create it first.
+    #[cfg(unix)]
+    #[test]
+    fn without_a_system_folder_flick_stays_in_the_home_folder() {
+        let dir = flick_in(None);
+        assert!(!dir.starts_with(std::env::temp_dir()), "{}", dir.display());
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(dir, home.join(".flick"));
+        }
+    }
+
     #[test]
     fn no_known_folders_means_no_roots() {
         assert!(default_roots_from([None, None, None]).is_empty());

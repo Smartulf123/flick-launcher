@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 /// The search bar's window, as a plain number so it can cross threads.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BarWindow(isize);
 
 impl BarWindow {
@@ -32,18 +32,18 @@ impl BarWindow {
     }
 
     /// The raw window handle, for APIs that take it as a number.
-    pub(super) fn raw(self) -> isize {
+    pub(super) fn raw(&self) -> isize {
         self.0
     }
 
-    fn hwnd(self) -> HWND {
+    fn hwnd(&self) -> HWND {
         HWND(self.0 as *mut _)
     }
 
     /// Shows the window and moves keyboard focus to it. Windows refuses
     /// `SetForegroundWindow` from background processes in some cases; the
     /// fallback borrows the foreground thread's input state for one call.
-    pub fn show_and_focus(self) {
+    pub fn show_and_focus(&self) {
         let hwnd = self.hwnd();
         // SAFETY: plain Win32 calls on a window this process owns; a stale
         // handle makes them fail harmlessly.
@@ -65,7 +65,7 @@ impl BarWindow {
 
     /// Asks Windows 11 to round the window's corners. Earlier Windows
     /// versions ignore the request and keep square corners.
-    pub fn round_corners(self) {
+    pub fn round_corners(&self) {
         let preference = DWMWCP_ROUND;
         // SAFETY: the pointer and size describe `preference`, which outlives the call.
         let result = unsafe {
@@ -83,7 +83,7 @@ impl BarWindow {
 
     /// The usable area (without the taskbar) of the monitor the window is
     /// on, in physical pixels: `[left, top, right, bottom]`.
-    pub fn work_area(self) -> Option<[i32; 4]> {
+    pub fn work_area(&self) -> Option<[i32; 4]> {
         let mut info = MONITORINFO {
             cbSize: size_of::<MONITORINFO>() as u32,
             ..Default::default()
@@ -98,7 +98,7 @@ impl BarWindow {
         ok.then_some([r.left, r.top, r.right, r.bottom])
     }
 
-    pub fn hide(self) {
+    pub fn hide(&self) {
         // SAFETY: see `show_and_focus`.
         unsafe {
             let _ = ShowWindow(self.hwnd(), SW_HIDE);

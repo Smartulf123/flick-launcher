@@ -180,7 +180,7 @@ fn main() -> eframe::Result {
             window.round_corners();
             let shown = Arc::new(AtomicBool::new(false));
             let mut hotkeys =
-                hotkey::Hotkeys::new(hotkey::on_press(window, shown.clone(), ctx.clone()));
+                hotkey::Hotkeys::new(hotkey::on_press(window.clone(), shown.clone(), ctx.clone()));
             let hotkey_error = match &mut hotkeys {
                 Ok(hotkeys) => hotkeys.change(&config.hotkey).err(),
                 Err(e) => Some(anyhow::anyhow!("{e:#}")),

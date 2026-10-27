@@ -32,7 +32,7 @@ pub fn with_tray_icon(
 pub fn configure(options: &mut eframe::NativeOptions) {
     #[cfg(target_os = "macos")]
     {
-        use eframe::winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
         options.event_loop_builder = Some(Box::new(|builder| {
             builder.with_activation_policy(ActivationPolicy::Accessory);
         }));
