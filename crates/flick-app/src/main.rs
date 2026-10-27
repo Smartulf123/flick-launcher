@@ -165,10 +165,7 @@ fn main() -> eframe::Result {
             let ctx = cc.egui_ctx.clone();
             let _ = wake.set(ctx.clone());
             let appearance = &config.appearance;
-            if !theme::is_known(&appearance.theme) {
-                log::warn!("unknown theme {:?}, using Kanagawa", appearance.theme);
-            }
-            theme::apply(&ctx, theme::palette(&appearance.theme));
+            theme::apply(&ctx, &theme::KANAGAWA);
             let background_source = BackgroundSource::from_setting(&appearance.background);
             let picture = ui::load_picture(&ctx, &background_source);
             let window = window::WindowHandle::from_creation_context(cc)?;
@@ -192,16 +189,11 @@ fn main() -> eframe::Result {
 
             // Tray clicks are queued and handled by the app on this thread.
             let tray_queue = ui::TrayQueue::default();
-            let theme_index = theme::PRESETS
-                .iter()
-                .position(|p| p.id == appearance.theme)
-                .unwrap_or(0);
             let tray = {
                 let (queue, ctx) = (tray_queue.clone(), ctx.clone());
                 tray::build(
                     &tray::tooltip(&config.hotkey, hotkey_error.as_deref()),
                     autostart::FLICK.is_enabled(),
-                    theme_index,
                     &background_source,
                     move |command| {
                         queue

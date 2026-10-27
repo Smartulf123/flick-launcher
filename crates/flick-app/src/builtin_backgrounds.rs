@@ -3,6 +3,10 @@
 
 /// One built-in picture. `id` is what `builtin:<id>` in the config names.
 #[derive(Debug)]
+#[expect(
+    dead_code,
+    reason = "title and credit are shown by the gallery (next task)"
+)]
 pub struct Builtin {
     pub id: &'static str,
     pub title: &'static str,

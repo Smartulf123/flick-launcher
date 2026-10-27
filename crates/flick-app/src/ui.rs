@@ -17,7 +17,7 @@ use global_hotkey::GlobalHotKeyManager;
 use crate::actions::run_action;
 use crate::icons::Icon;
 use crate::shell_icons::IconCache;
-use crate::theme::{self, PRESETS, Palette};
+use crate::theme::{self, KANAGAWA, Palette};
 use crate::tray::{BackgroundChoice, Tray, TrayCommand};
 use crate::window::WindowHandle;
 use crate::{autostart, background, paths, placement};
@@ -79,9 +79,10 @@ pub struct FlickApp {
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
 pub fn load_picture(ctx: &egui::Context, source: &BackgroundSource) -> Option<TextureHandle> {
-    let path = background::resolve(source)?;
-    match background::load(&path) {
-        Ok(image) => Some(ctx.load_texture("background", image, TextureOptions::LINEAR)),
+    match background::load_source(source) {
+        Ok(image) => {
+            image.map(|image| ctx.load_texture("background", image, TextureOptions::LINEAR))
+        }
         Err(e) => {
             log::error!("background picture: {e:#}");
             None
@@ -96,12 +97,11 @@ impl FlickApp {
         settings: Settings,
         picture: Option<TextureHandle>,
     ) -> Self {
-        let palette = theme::palette(&settings.config.appearance.theme);
         Self {
             launcher,
             services,
             settings,
-            palette,
+            palette: &KANAGAWA,
             picture,
             icons: IconCache::default(),
             pending: Vec::new(),
@@ -143,7 +143,6 @@ impl FlickApp {
     fn handle_tray(&mut self, ctx: &egui::Context, command: TrayCommand) {
         match command {
             TrayCommand::ToggleStartWithWindows => autostart::toggle(),
-            TrayCommand::SetTheme(index) => self.set_theme(ctx, index),
             TrayCommand::Background(choice) => self.set_background(ctx, choice),
             TrayCommand::ReloadIndex => (self.services.reindex)(),
             TrayCommand::Quit => {
@@ -156,53 +155,41 @@ impl FlickApp {
         }
     }
 
-    fn set_theme(&mut self, ctx: &egui::Context, index: usize) {
-        let Some(palette) = PRESETS.get(index) else {
-            return;
-        };
-        self.palette = palette;
-        theme::apply(ctx, palette);
-        if let Some(tray) = &self.services.tray {
-            tray.show_theme(index);
-        }
-        self.settings.config.appearance.theme = palette.id.to_owned();
-        self.save_settings();
-        log::info!("theme: {}", palette.name);
-    }
-
     fn set_background(&mut self, ctx: &egui::Context, choice: BackgroundChoice) {
-        let current = BackgroundSource::from_setting(&self.settings.config.appearance.background);
-        let source = match choice {
-            BackgroundChoice::Wallpaper => Some(BackgroundSource::Wallpaper),
-            BackgroundChoice::None => Some(BackgroundSource::None),
-            BackgroundChoice::WindowsPictures => {
-                background::pick_picture(&background::windows_pictures_dir())
-                    .map(BackgroundSource::File)
-            }
+        match choice {
+            BackgroundChoice::Browse => self.open_gallery(ctx),
             BackgroundChoice::ChooseFile => {
-                background::pick_picture(&paths::pictures_dir()).map(BackgroundSource::File)
+                if let Some(path) = background::pick_picture(&paths::pictures_dir()) {
+                    self.use_background(ctx, BackgroundSource::File(path));
+                }
             }
-        };
-        // Cancelled picker, or a picture that will not load: keep what we had.
-        let applied = source.and_then(|source| {
-            let picture = load_picture(ctx, &source);
-            let wants_picture = source != BackgroundSource::None;
-            (picture.is_some() || !wants_picture).then_some((source, picture))
-        });
-        let shown = match applied {
-            Some((source, picture)) => {
-                self.picture = picture;
-                self.settings.config.appearance.background = source.to_setting();
-                self.save_settings();
-                log::info!("background: {}", source.to_setting());
-                source
+            BackgroundChoice::None => {
+                self.use_background(ctx, BackgroundSource::None);
             }
-            None => current,
-        };
+        }
         // The menu flips a tick on click; set the ticks to what is really shown.
         if let Some(tray) = &self.services.tray {
+            let shown = BackgroundSource::from_setting(&self.settings.config.appearance.background);
             tray.show_background(&shown);
         }
+    }
+
+    /// Shows `source` and saves it. A picture that will not load leaves the
+    /// current background as it is and returns false.
+    fn use_background(&mut self, ctx: &egui::Context, source: BackgroundSource) -> bool {
+        let picture = load_picture(ctx, &source);
+        if picture.is_none() && source != BackgroundSource::None {
+            return false;
+        }
+        self.picture = picture;
+        self.settings.config.appearance.background = source.to_setting();
+        self.save_settings();
+        log::info!("background: {}", source.to_setting());
+        true
+    }
+
+    fn open_gallery(&mut self, _ctx: &egui::Context) {
+        log::info!("gallery not yet");
     }
 
     /// Draws the two cards. Returns the effects of a mouse click on a result.

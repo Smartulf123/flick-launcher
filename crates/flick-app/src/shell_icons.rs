@@ -3,6 +3,9 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
+
+static SHELL_LOCK: Mutex<()> = Mutex::new(());
 
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use windows::Win32::Graphics::Gdi::{
@@ -63,6 +66,9 @@ thread_local! {
 /// looked up by extension only, so OneDrive files are never downloaded.
 pub fn lookup(path: &Path, is_dir: bool) -> Option<ShellIcon> {
     COM_READY.with(|_| ());
+    // The shell's icon list misbehaves when two threads use it at once
+    // (success with no icon). One lookup at a time, process-wide.
+    let _one_at_a_time = SHELL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let own_icon = !is_dir && icon_key(path, false).contains('\\');
     let (attributes, mut flags) = if is_dir {
         (FILE_ATTRIBUTE_DIRECTORY, SHGFI_USEFILEATTRIBUTES)
