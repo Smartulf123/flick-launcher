@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The LaunchAgent's label, also the bundle identifier.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const LABEL_ID: &str = "io.github.smartulf123.flick";
 
 /// The program to start: inside an AppImage the running binary lives on a
@@ -20,6 +21,7 @@ pub fn self_command(appimage: Option<&str>, exe: &Path) -> PathBuf {
 /// `~/.config/autostart/flick.desktop`. The path is quoted for the
 /// Desktop Entry `Exec` key: `"`, `` ` ``, `$` and `\` get a backslash,
 /// and `%` (a field code) is doubled.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn desktop_entry(exe: &Path) -> String {
     let mut quoted = String::new();
     for c in exe.to_string_lossy().chars() {
@@ -38,6 +40,7 @@ pub fn desktop_entry(exe: &Path) -> String {
 }
 
 /// `~/Library/LaunchAgents/io.github.smartulf123.flick.plist`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn launch_agent_plist(exe: &Path) -> String {
     let exe = exe
         .to_string_lossy()
