@@ -6,7 +6,7 @@ use std::path::Path;
 use eframe::egui::{self, TextureHandle};
 
 #[derive(Default)]
-pub struct IconCache;
+pub struct IconCache(());
 
 impl IconCache {
     /// Always `None`: the caller falls back to Flick's own icons.

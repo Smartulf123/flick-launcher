@@ -63,11 +63,14 @@ pub struct Tray {
     icon: TrayIcon,
     no_background: CheckMenuItem,
     /// The background choices, shown by the gear or a right-click on the bar.
+    /// Only Windows pops it up natively; macOS and Linux draw it in the bar.
+    #[cfg_attr(not(windows), allow(dead_code))]
     bar_menu: Menu,
 }
 
 impl Tray {
     /// The gear menu's items (background choices and Change hotkey).
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn bar_menu(&self) -> &Menu {
         &self.bar_menu
     }
