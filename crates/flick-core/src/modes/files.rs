@@ -91,7 +91,8 @@ mod tests {
         let entries = names
             .iter()
             .map(|n| FileEntry {
-                path: PathBuf::from(format!(r"C:\test\{n}")),
+                // Joined, not written out, so the paths suit every system.
+                path: PathBuf::from("test").join(n),
                 name: (*n).to_owned(),
                 is_dir: false,
             })
@@ -111,9 +112,9 @@ mod tests {
         );
         assert_eq!(
             r[0].action,
-            Action::OpenPath(r"C:\test\budget_2026.xlsx".into())
+            Action::OpenPath(PathBuf::from("test").join("budget_2026.xlsx"))
         );
-        assert_eq!(r[0].subtitle, r"C:\test");
+        assert_eq!(r[0].subtitle, "test");
     }
 
     #[test]
