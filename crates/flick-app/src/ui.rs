@@ -86,6 +86,8 @@ pub struct FlickApp {
     gallery: Option<Gallery>,
     /// Background choices in order; only the latest may be applied.
     picks: Picks,
+    /// Where the bar was when the gallery opened, to go back there.
+    bar_position: Option<egui::Pos2>,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -122,6 +124,7 @@ impl FlickApp {
             wants_bar_menu: false,
             gallery: None,
             picks: Picks::default(),
+            bar_position: None,
         }
     }
 
@@ -203,8 +206,22 @@ impl FlickApp {
         true
     }
 
+    /// The usable area of the window's monitor, in egui points.
+    fn work_area(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        let [left, top, right, bottom] = self.services.window.work_area()?;
+        let scale = ctx
+            .input(|i| i.viewport().native_pixels_per_point)
+            .unwrap_or_else(|| ctx.pixels_per_point());
+        Some(egui::Rect::from_min_max(
+            egui::pos2(left as f32, top as f32) / scale,
+            egui::pos2(right as f32, bottom as f32) / scale,
+        ))
+    }
+
     /// Turns the window into the gallery: larger, centered on where the bar
-    /// was, kept on screen, and shown (it may be opened from the tray).
+    /// was, inside the same monitor, and shown (it may be opened from the
+    /// tray). It is an ordinary window while open, so a browser opened from
+    /// "Open page" can come in front of it.
     fn open_gallery(&mut self, ctx: &egui::Context) {
         if self.gallery.is_some() {
             return;
@@ -215,23 +232,24 @@ impl FlickApp {
         ));
         self.launcher.reset();
         self.pending.clear();
-        self.height = GALLERY_HEIGHT;
-        ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
-            GALLERY_WIDTH,
-            GALLERY_HEIGHT,
-        )));
-        let (outer, monitor) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size));
-        if let Some(outer) = outer {
-            let top = monitor
-                .and_then(|m| placement::keep_on_screen(outer.top(), GALLERY_HEIGHT, m.y))
-                .unwrap_or(outer.top());
-            let left = (outer.left() - (GALLERY_WIDTH - WIDTH) / 2.0).max(0.0);
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(left, top)));
+
+        let outer = ctx.input(|i| i.viewport().outer_rect);
+        self.bar_position = outer.map(|r| r.min);
+        let wanted = vec2(GALLERY_WIDTH, GALLERY_HEIGHT);
+        let work = self.work_area(ctx);
+        let size = work.map_or(wanted, |w| placement::fit_size(w, wanted, 16.0));
+        self.height = size.y;
+        ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
+        if let (Some(outer), Some(work)) = (outer, work) {
+            let centered = egui::pos2(outer.left() - (size.x - WIDTH) / 2.0, outer.top());
+            let at = placement::place_in(work.shrink(16.0), size, centered);
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(at));
         }
         self.services.window.show_and_focus();
     }
 
-    /// Back to the search bar at its usual width.
+    /// Back to the search bar, where it was before the gallery opened.
     fn close_gallery(&mut self, ctx: &egui::Context) {
         if self.gallery.take().is_none() {
             return;
@@ -239,13 +257,10 @@ impl FlickApp {
         // Searches and thumbnails still queued are no longer wanted.
         self.services.loader.generations().next();
         self.height = START_HEIGHT;
+        ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, START_HEIGHT)));
-        if let Some(outer) = ctx.input(|i| i.viewport().outer_rect) {
-            let left = outer.left() + (GALLERY_WIDTH - WIDTH) / 2.0;
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(
-                left,
-                outer.top(),
-            )));
+        if let Some(at) = self.bar_position.take() {
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(at));
         }
     }
 
@@ -645,6 +660,8 @@ impl eframe::App for FlickApp {
             self.positioned = true;
         }
         if self.services.shown.swap(false, Ordering::Relaxed) {
+            // The hotkey always brings back the search bar.
+            self.close_gallery(ctx);
             // Every show starts empty, whatever happened before the last hide.
             self.launcher.reset();
             self.pending.clear();

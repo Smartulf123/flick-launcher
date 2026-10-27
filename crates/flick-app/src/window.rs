@@ -10,6 +10,9 @@ use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     DwmSetWindowAttribute,
 };
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+};
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SW_HIDE, SW_SHOW,
@@ -76,6 +79,23 @@ impl WindowHandle {
         if let Err(e) = result {
             log::info!("rounded corners not available: {e}");
         }
+    }
+
+    /// The usable area (without the taskbar) of the monitor the window is
+    /// on, in physical pixels: `[left, top, right, bottom]`.
+    pub fn work_area(self) -> Option<[i32; 4]> {
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: `info` is a correctly sized MONITORINFO; the monitor handle
+        // comes straight from Windows for our own window.
+        let ok = unsafe {
+            let monitor = MonitorFromWindow(self.hwnd(), MONITOR_DEFAULTTONEAREST);
+            GetMonitorInfoW(monitor, &mut info).as_bool()
+        };
+        let r = info.rcWork;
+        ok.then_some([r.left, r.top, r.right, r.bottom])
     }
 
     pub fn hide(self) {
