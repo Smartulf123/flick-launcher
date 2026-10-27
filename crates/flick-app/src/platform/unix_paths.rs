@@ -8,10 +8,14 @@
 
 use std::path::PathBuf;
 
-/// `dir/flick`, or a `flick` folder in the temp dir if the system names none.
+/// `dir/flick`, or `~/.flick` if the system names no folder. Never the
+/// shared temp folder, where another user could create `flick` first.
 #[cfg(unix)]
 fn flick_in(dir: Option<PathBuf>) -> PathBuf {
-    dir.unwrap_or_else(std::env::temp_dir).join("flick")
+    match dir {
+        Some(dir) => dir.join("flick"),
+        None => dirs::home_dir().unwrap_or_default().join(".flick"),
+    }
 }
 
 #[cfg(unix)]

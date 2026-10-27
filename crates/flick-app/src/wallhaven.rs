@@ -179,9 +179,10 @@ mod tests {
 
     #[test]
     fn download_names_are_safe() {
+        // Built with join, so the test holds on every system.
         assert_eq!(
-            download_path(Path::new(r"C:\bg"), "mlzoy1"),
-            Some(PathBuf::from(r"C:\bg\wallhaven-mlzoy1.jpg"))
+            download_path(Path::new("bg"), "mlzoy1"),
+            Some(Path::new("bg").join("wallhaven-mlzoy1.jpg"))
         );
         assert_eq!(download_path(Path::new(r"C:\bg"), r"..\evil"), None);
         assert_eq!(download_path(Path::new(r"C:\bg"), ""), None);
