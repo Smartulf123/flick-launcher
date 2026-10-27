@@ -37,6 +37,18 @@ impl SuggestionCache {
         self.lock().get(&(engine, query.to_owned())).cloned()
     }
 
+    /// Suggestions for the longest earlier text that `query` starts with
+    /// (for "rus": "ru", else "r"), to show while fresh ones load.
+    pub fn best_prefix(&self, engine: Engine, query: &str) -> Option<Vec<String>> {
+        self.lock()
+            .iter()
+            .filter(|((e, q), list)| {
+                *e == engine && !list.is_empty() && query.starts_with(q.as_str())
+            })
+            .max_by_key(|((_, q), _)| q.len())
+            .map(|(_, list)| list.clone())
+    }
+
     pub fn insert(&self, engine: Engine, query: &str, suggestions: Vec<String>) {
         let mut map = self.lock();
         if map.len() >= CACHE_LIMIT {

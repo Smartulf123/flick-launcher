@@ -76,23 +76,27 @@ impl SearchMode for WebSearchMode {
         }];
 
         if let Some(suggestions) = &self.suggestions {
-            match suggestions.cache.get(self.engine, text) {
-                Some(list) => rows.extend(
-                    list.into_iter()
-                        .filter(|s| !s.eq_ignore_ascii_case(text))
-                        .filter_map(|s| {
-                            let url = self.search_url(&s)?;
-                            Some(ResultItem {
-                                title: s,
-                                subtitle: String::new(),
-                                score: 0,
-                                action: Action::OpenUrl(url),
-                                kind: ResultKind::Web,
-                            })
-                        }),
-                ),
-                None => suggestions.source.request(self.engine, text),
-            }
+            let list = suggestions.cache.get(self.engine, text).or_else(|| {
+                suggestions.source.request(self.engine, text);
+                // Until they arrive, keep the last suggestions for what was
+                // typed before, so the list does not shrink and grow per key.
+                suggestions.cache.best_prefix(self.engine, text)
+            });
+            rows.extend(
+                list.unwrap_or_default()
+                    .into_iter()
+                    .filter(|s| !s.eq_ignore_ascii_case(text))
+                    .filter_map(|s| {
+                        let url = self.search_url(&s)?;
+                        Some(ResultItem {
+                            title: s,
+                            subtitle: String::new(),
+                            score: 0,
+                            action: Action::OpenUrl(url),
+                            kind: ResultKind::Web,
+                        })
+                    }),
+            );
         }
         rows.truncate(max_results.max(1));
         rows
@@ -188,6 +192,27 @@ mod tests {
         );
         assert_eq!(r[2].kind, ResultKind::Web);
         assert!(recorder.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn while_waiting_the_previous_suggestions_stay() {
+        // "ru" has suggestions; "rus" is still on its way.
+        let (mode, cache, recorder) = with_suggestions(WebSearchMode::google());
+        cache.insert(Engine::Google, "ru", vec!["rust".into(), "ruby".into()]);
+        let titles: Vec<_> = mode.query("rus", 8).into_iter().map(|i| i.title).collect();
+        assert_eq!(titles, ["Search Google for \"rus\"", "rust", "ruby"]);
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            [(Engine::Google, "rus".to_owned())]
+        );
+    }
+
+    #[test]
+    fn exact_suggestions_win_over_older_ones() {
+        let (mode, cache, _) = with_suggestions(WebSearchMode::google());
+        cache.insert(Engine::Google, "ru", vec!["ruby".into()]);
+        cache.insert(Engine::Google, "rus", vec!["rust".into()]);
+        assert_eq!(mode.query("rus", 8)[1].title, "rust");
     }
 
     #[test]
