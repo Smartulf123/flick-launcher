@@ -28,6 +28,17 @@ pub fn cover_uv(image: [usize; 2], target: Vec2) -> Rect {
     }
 }
 
+/// Like `cover_uv`, but the picture is fitted once to a canvas
+/// `canvas_height` tall and the window shows its top part. As the window
+/// grows (up to the canvas), more of the same picture is uncovered below
+/// instead of the whole picture shifting and zooming.
+pub fn anchored_uv(image: [usize; 2], target: Vec2, canvas_height: f32) -> Rect {
+    let canvas = Vec2::new(target.x, canvas_height.max(target.y));
+    let full = cover_uv(image, canvas);
+    let shown = full.height() * target.y / canvas.y;
+    Rect::from_min_max(full.min, pos2(full.max.x, full.min.y + shown))
+}
+
 /// Size after scaling down to at most `max_width`, keeping the shape.
 pub fn scaled_size(width: u32, height: u32, max_width: u32) -> (u32, u32) {
     if width <= max_width {
@@ -118,6 +129,39 @@ mod tests {
         let uv = cover_uv([2000, 1000], vec2(400.0, 400.0));
         assert!(
             close(uv, Rect::from_min_max(pos2(0.25, 0.0), pos2(0.75, 1.0))),
+            "{uv:?}"
+        );
+    }
+
+    #[test]
+    fn short_window_shows_the_top_of_the_full_crop() {
+        // A square picture on a 640 x 640 canvas uses all of it; a 160 px
+        // tall bar shows its top quarter.
+        let uv = anchored_uv([1000, 1000], vec2(640.0, 160.0), 640.0);
+        assert!(
+            close(uv, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 0.25))),
+            "{uv:?}"
+        );
+    }
+
+    #[test]
+    fn growing_window_reveals_more_without_moving_the_picture() {
+        let small = anchored_uv([1920, 1080], vec2(640.0, 120.0), 520.0);
+        let big = anchored_uv([1920, 1080], vec2(640.0, 400.0), 520.0);
+        // Same left, right and top: only the bottom edge moves down.
+        assert!((small.left() - big.left()).abs() < 1e-4);
+        assert!((small.right() - big.right()).abs() < 1e-4);
+        assert!((small.top() - big.top()).abs() < 1e-4);
+        assert!(big.bottom() > small.bottom());
+        // Pixels per point stay the same, so nothing zooms.
+        assert!((small.height() / 120.0 - big.height() / 400.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn window_taller_than_the_canvas_just_covers() {
+        let uv = anchored_uv([2000, 1000], vec2(400.0, 400.0), 200.0);
+        assert!(
+            close(uv, cover_uv([2000, 1000], vec2(400.0, 400.0))),
             "{uv:?}"
         );
     }

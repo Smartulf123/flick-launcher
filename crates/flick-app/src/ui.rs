@@ -29,6 +29,9 @@ pub const WIDTH: f32 = 640.0;
 /// Height before the first frame measures the real content.
 pub const START_HEIGHT: f32 = 120.0;
 /// Space around and between the cards, where the picture shows.
+/// About the bar's height with a full list of results. The background is
+/// fitted to this height once, so it stays put while results come and go.
+const FULL_HEIGHT: f32 = 520.0;
 const GAP: i8 = 10;
 const ICON_SIZE: f32 = 20.0;
 /// The window's size while the background gallery is open.
@@ -437,7 +440,7 @@ impl FlickApp {
     fn paint_background(&self, ui: &egui::Ui, window: egui::Rect) {
         match &self.picture {
             Some(picture) => {
-                let uv = background::cover_uv(picture.size(), window.size());
+                let uv = background::anchored_uv(picture.size(), window.size(), FULL_HEIGHT);
                 ui.painter().image(picture.id(), window, uv, Color32::WHITE);
             }
             None => {
