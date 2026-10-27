@@ -7,6 +7,8 @@ mod builtin_backgrounds;
 mod gallery;
 mod gallery_loader;
 mod hotkey;
+mod hotkey_picker;
+mod hotkey_text;
 mod http;
 mod icons;
 mod paths;
