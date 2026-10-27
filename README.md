@@ -1,4 +1,4 @@
-﻿# Flick
+# Flick
 
 A keyboard launcher for Windows 11, written entirely in Rust. Press a hotkey and a small search bar appears in the middle of the screen:
 
