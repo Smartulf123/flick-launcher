@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod actions;
+mod autostart;
 mod hotkey;
 mod icons;
 mod paths;
@@ -80,6 +81,42 @@ fn start_logging() {
     }
 }
 
+/// Turns start-with-Windows on at the very first run, and keeps an existing
+/// entry pointing at this exe if Flick has moved.
+fn sync_start_with_windows(first_run: bool) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let entry = autostart::FLICK;
+    let result = if first_run {
+        log::info!("first run: starting with Windows from {}", exe.display());
+        entry.enable(&exe)
+    } else if entry.is_enabled() && !entry.points_to(&exe) {
+        log::info!("start-with-Windows now points to {}", exe.display());
+        entry.enable(&exe)
+    } else {
+        Ok(())
+    };
+    if let Err(e) = result {
+        log::error!("could not update start-with-Windows: {e}");
+    }
+}
+
+/// The tray checkbox: flip the registry entry to match.
+fn toggle_start_with_windows() {
+    let entry = autostart::FLICK;
+    let result = if entry.is_enabled() {
+        log::info!("start with Windows: off");
+        entry.disable()
+    } else {
+        log::info!("start with Windows: on");
+        std::env::current_exe().and_then(|exe| entry.enable(&exe))
+    };
+    if let Err(e) = result {
+        log::error!("could not change start-with-Windows: {e}");
+    }
+}
+
 fn main() -> eframe::Result {
     let Some(_instance) = single_instance::acquire() else {
         return Ok(());
@@ -87,10 +124,12 @@ fn main() -> eframe::Result {
     start_logging();
 
     let config_path = paths::config_path();
+    let first_run = !config_path.exists();
     let (config, error) = config::load_or_create(&config_path);
     if let Some(e) = error {
         log::error!("{}: {e}; using defaults", config_path.display());
     }
+    sync_start_with_windows(first_run);
 
     let shared = SharedIndex::default();
     let (registry, default_mode) = config::build_registry(&config, shared.clone())
@@ -157,7 +196,9 @@ fn main() -> eframe::Result {
                 let (reindexer, quit, ctx) = (reindexer.clone(), quit.clone(), ctx.clone());
                 tray::build(
                     &tray::tooltip(&config.hotkey, hotkey_error.as_deref()),
+                    autostart::FLICK.is_enabled(),
                     move |command| match command {
+                        tray::TrayCommand::ToggleStartWithWindows => toggle_start_with_windows(),
                         tray::TrayCommand::ReloadIndex => {
                             reindexer.run();
                         }

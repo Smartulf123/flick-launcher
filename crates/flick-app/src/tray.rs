@@ -1,7 +1,7 @@
-//! The tray icon: shows the hotkey, and offers Reload index and Quit.
+//! The tray icon: shows the hotkey, and offers Start with Windows, Reload index and Quit.
 
 use anyhow::Context as _;
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 pub const ICON_SIZE: u32 = 32;
@@ -9,6 +9,8 @@ pub const ICON_SIZE: u32 = 32;
 /// What the tray menu asks the app to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCommand {
+    /// The checkbox was clicked; Windows has already flipped its tick.
+    ToggleStartWithWindows,
     ReloadIndex,
     Quit,
 }
@@ -40,17 +42,24 @@ pub fn circle_rgba(size: u32) -> Vec<u8> {
 /// menu item is clicked. Keep the returned icon alive.
 pub fn build(
     status: &str,
+    start_with_windows: bool,
     on_command: impl Fn(TrayCommand) + Send + Sync + 'static,
 ) -> anyhow::Result<TrayIcon> {
+    let autostart = CheckMenuItem::new("Start with Windows", true, start_with_windows, None);
     let reload = MenuItem::new("Reload index", true, None);
     let quit = MenuItem::new("Quit", true, None);
     let menu = Menu::new();
+    menu.append(&autostart)?;
     menu.append(&reload)?;
+    menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&quit)?;
 
+    let autostart_id = autostart.id().clone();
     let (reload_id, quit_id) = (reload.id().clone(), quit.id().clone());
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        if event.id == reload_id {
+        if event.id == autostart_id {
+            on_command(TrayCommand::ToggleStartWithWindows);
+        } else if event.id == reload_id {
             on_command(TrayCommand::ReloadIndex);
         } else if event.id == quit_id {
             on_command(TrayCommand::Quit);
