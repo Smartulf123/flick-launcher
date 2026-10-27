@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
-    FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, KNOWN_FOLDER_FLAG,
+    FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Pictures, KNOWN_FOLDER_FLAG,
     SHGetKnownFolderPath,
 };
 use windows::core::GUID;
@@ -35,6 +35,15 @@ pub fn default_roots() -> Vec<PathBuf> {
         .collect()
 }
 
+/// Your Pictures folder (OneDrive-aware), where "Choose a picture..." opens.
+pub fn pictures_dir() -> PathBuf {
+    known_folder(&FOLDERID_Pictures).unwrap_or_else(|| {
+        std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    })
+}
+
 fn known_folder(id: &GUID) -> Option<PathBuf> {
     // SAFETY: SHGetKnownFolderPath allocates the string; we copy it and free it once.
     unsafe {
@@ -54,6 +63,11 @@ mod tests {
         let appdata = PathBuf::from(std::env::var_os("APPDATA").unwrap());
         assert_eq!(config_path(), appdata.join("flick").join("config.toml"));
         assert_eq!(log_path(), appdata.join("flick").join("flick.log"));
+    }
+
+    #[test]
+    fn pictures_dir_exists() {
+        assert!(pictures_dir().is_dir(), "{}", pictures_dir().display());
     }
 
     #[test]

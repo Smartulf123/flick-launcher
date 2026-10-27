@@ -1,16 +1,37 @@
 //! Small icons drawn with egui's painter, so the app ships no icon font or images.
 
-use eframe::egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
+use eframe::egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use flick_core::mode::ResultKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Search,
     Web,
-    Video,
+    /// Brand-style mark in Google's colors (drawn, not the logo file).
+    Google,
+    /// Brand-style red play button (drawn, not the logo file).
+    YouTube,
     File,
     Folder,
     Info,
+}
+
+const GOOGLE_BLUE: Color32 = Color32::from_rgb(0x42, 0x85, 0xf4);
+const GOOGLE_GREEN: Color32 = Color32::from_rgb(0x34, 0xa8, 0x53);
+const GOOGLE_YELLOW: Color32 = Color32::from_rgb(0xfb, 0xbc, 0x05);
+const GOOGLE_RED: Color32 = Color32::from_rgb(0xea, 0x43, 0x35);
+const YOUTUBE_RED: Color32 = Color32::from_rgb(0xff, 0x00, 0x00);
+
+/// Points along a circle from `start` to `end` degrees (0 = right, clockwise).
+fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
+    let steps = ((end - start).abs() / 6.0).ceil().max(2.0) as usize;
+    (0..=steps)
+        .map(|i| {
+            let deg = start + (end - start) * i as f32 / steps as f32;
+            let rad = deg.to_radians();
+            pos2(center.x + rad.cos() * radius, center.y + rad.sin() * radius)
+        })
+        .collect()
 }
 
 impl Icon {
@@ -26,10 +47,21 @@ impl Icon {
     /// The chip icon for a mode, by its display name.
     pub fn for_mode(name: &str) -> Self {
         match name {
-            "Google" => Icon::Web,
-            "YouTube" => Icon::Video,
+            "Google" => Icon::Google,
+            "YouTube" => Icon::YouTube,
             "Files" => Icon::Folder,
             _ => Icon::Search,
+        }
+    }
+
+    /// The mark for a web result, by the site it opens.
+    pub fn for_url(url: &str) -> Self {
+        if url.contains("youtube.com") {
+            Icon::YouTube
+        } else if url.contains("google.") {
+            Icon::Google
+        } else {
+            Icon::Web
         }
     }
 
@@ -57,14 +89,36 @@ impl Icon {
                     .collect();
                 painter.add(Shape::closed_line(meridian, stroke));
             }
-            Icon::Video => {
-                let body = Rect::from_min_max(at(0.08, 0.22), at(0.92, 0.78));
-                painter.rect_stroke(body, s * 0.14, stroke, StrokeKind::Middle);
+            Icon::YouTube => {
+                let body = Rect::from_min_max(at(0.04, 0.18), at(0.96, 0.82));
+                painter.rect_filled(body, s * 0.18, YOUTUBE_RED);
                 painter.add(Shape::convex_polygon(
-                    vec![at(0.42, 0.36), at(0.66, 0.50), at(0.42, 0.64)],
-                    color,
+                    vec![at(0.40, 0.34), at(0.68, 0.50), at(0.40, 0.66)],
+                    Color32::WHITE,
                     Stroke::NONE,
                 ));
+            }
+            Icon::Google => {
+                // A "G" as four colored arcs plus the blue bar; the opening
+                // sits between -40 and 0 degrees (upper right).
+                let c = r.center();
+                let radius = s * 0.34;
+                let ring = Stroke::new(s * 0.16, GOOGLE_RED);
+                for (start, end, colour) in [
+                    (200.0, 320.0, GOOGLE_RED),
+                    (135.0, 200.0, GOOGLE_YELLOW),
+                    (45.0, 135.0, GOOGLE_GREEN),
+                    (0.0, 45.0, GOOGLE_BLUE),
+                ] {
+                    painter.add(Shape::line(
+                        arc(c, radius, start, end),
+                        Stroke::new(ring.width, colour),
+                    ));
+                }
+                painter.line_segment(
+                    [pos2(c.x, c.y), pos2(c.x + radius + ring.width / 2.0, c.y)],
+                    Stroke::new(ring.width, GOOGLE_BLUE),
+                );
             }
             Icon::Folder => {
                 painter.add(Shape::closed_line(
@@ -117,9 +171,22 @@ mod tests {
 
     #[test]
     fn modes_get_their_icon() {
-        assert_eq!(Icon::for_mode("Google"), Icon::Web);
-        assert_eq!(Icon::for_mode("YouTube"), Icon::Video);
+        assert_eq!(Icon::for_mode("Google"), Icon::Google);
+        assert_eq!(Icon::for_mode("YouTube"), Icon::YouTube);
         assert_eq!(Icon::for_mode("Files"), Icon::Folder);
         assert_eq!(Icon::for_mode("Something new"), Icon::Search);
+    }
+
+    #[test]
+    fn web_results_get_the_site_mark() {
+        assert_eq!(
+            Icon::for_url("https://www.youtube.com/results?search_query=x"),
+            Icon::YouTube
+        );
+        assert_eq!(
+            Icon::for_url("https://www.google.com/search?q=x"),
+            Icon::Google
+        );
+        assert_eq!(Icon::for_url("https://example.com/"), Icon::Web);
     }
 }

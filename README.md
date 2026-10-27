@@ -40,6 +40,11 @@ Run `target\release\flick.exe`. Nothing appears until you press the hotkey (Alt+
 | `files.roots` | `[]` | Folders to index. Empty means Desktop, Documents and Downloads (OneDrive folders included). |
 | `files.exclude_dir_names` | `.git`, `node_modules`, `target`, `$RECYCLE.BIN` | Folder names skipped with their contents. |
 | `files.reindex_minutes` | `30` | How often the index is rebuilt. `0` turns it off. |
+| `appearance.theme` | `"kanagawa"` | `kanagawa`, `tokyo-night`, `rose-pine`, `catppuccin-mocha`, `gruvbox` or `dracula`. Also in the tray's Theme menu. |
+| `appearance.background` | `"wallpaper"` | `wallpaper` (your desktop wallpaper), `none`, or a path to a JPG, PNG or WebP. Also in the tray's Background menu. |
+| `appearance.tint` | `0.55` | How dark the cards are over the picture, from `0` (clear) to `1` (solid). |
+
+The tray's Theme and Background menus save your choice into this file, rewriting it (hand-written comments are not kept).
 
 A broken config file never stops Flick: it falls back to the defaults and writes the error to `%APPDATA%\flick\flick.log` (replaced at each start).
 

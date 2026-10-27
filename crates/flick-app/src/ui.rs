@@ -1,36 +1,57 @@
-//! The search bar window: draws the launcher state and feeds it key presses.
+//! The search bar window: a background picture with two floating cards
+//! (search, results), driven by key presses and tray commands.
 
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use eframe::egui::{self, Key, Modifiers, RichText, TextEdit, ViewportCommand};
+use eframe::egui::{
+    self, Align, Color32, Key, Layout, Modifiers, RichText, TextEdit, TextureHandle,
+    TextureOptions, ViewportCommand, vec2,
+};
+use flick_core::config::{self, BackgroundSource, Config};
 use flick_core::launcher::{Effect, Intent, Launcher};
-use flick_core::mode::ResultItem;
+use flick_core::mode::{Action, ResultItem, ResultKind};
 use global_hotkey::GlobalHotKeyManager;
-use tray_icon::TrayIcon;
 
 use crate::actions::run_action;
 use crate::icons::Icon;
-use crate::theme;
+use crate::shell_icons::IconCache;
+use crate::theme::{self, PRESETS, Palette};
+use crate::tray::{BackgroundChoice, Tray, TrayCommand};
 use crate::window::WindowHandle;
+use crate::{autostart, background, paths};
 
 pub const WIDTH: f32 = 640.0;
 /// Height before the first frame measures the real content.
 pub const START_HEIGHT: f32 = 120.0;
+/// Space around and between the cards, where the picture shows.
+const GAP: i8 = 10;
+const ICON_SIZE: f32 = 20.0;
 
-/// The parts of the app that run while the bar is hidden.
-pub struct Background {
+/// Tray clicks waiting for the event-loop thread.
+pub type TrayQueue = Arc<Mutex<Vec<TrayCommand>>>;
+
+/// The parts of the app that keep running while the bar is hidden.
+pub struct Services {
     /// Set by the indexing thread when a new file index is ready.
     pub index_updated: Arc<AtomicBool>,
-    /// Set by the tray's Quit item.
-    pub quit: Arc<AtomicBool>,
     /// Set by the hotkey handler each time it shows the bar.
     pub shown: Arc<AtomicBool>,
     pub window: WindowHandle,
     /// Keeps the hotkey registered; `None` if registration failed.
     pub hotkey: Option<GlobalHotKeyManager>,
     /// Keeps the tray icon alive; `None` if it could not be created.
-    pub tray: Option<TrayIcon>,
+    pub tray: Option<Tray>,
+    pub tray_queue: TrayQueue,
+    /// Starts a file index rebuild.
+    pub reindex: Box<dyn Fn()>,
+}
+
+/// The config as loaded, and where to save changes made from the tray.
+pub struct Settings {
+    pub config: Config,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,18 +62,44 @@ enum Visibility {
 
 pub struct FlickApp {
     launcher: Launcher,
-    background: Background,
+    services: Services,
+    settings: Settings,
+    palette: &'static Palette,
+    picture: Option<TextureHandle>,
+    icons: IconCache,
     /// Keys held back one frame because text was typed before them.
     pending: Vec<Intent>,
     height: f32,
     was_focused: bool,
 }
 
+/// Loads the picture for `source` as a texture; `None` for no picture or on error.
+pub fn load_picture(ctx: &egui::Context, source: &BackgroundSource) -> Option<TextureHandle> {
+    let path = background::resolve(source)?;
+    match background::load(&path) {
+        Ok(image) => Some(ctx.load_texture("background", image, TextureOptions::LINEAR)),
+        Err(e) => {
+            log::error!("background picture: {e:#}");
+            None
+        }
+    }
+}
+
 impl FlickApp {
-    pub fn new(launcher: Launcher, background: Background) -> Self {
+    pub fn new(
+        launcher: Launcher,
+        services: Services,
+        settings: Settings,
+        picture: Option<TextureHandle>,
+    ) -> Self {
+        let palette = theme::palette(&settings.config.appearance.theme);
         Self {
             launcher,
-            background,
+            services,
+            settings,
+            palette,
+            picture,
+            icons: IconCache::default(),
             pending: Vec::new(),
             height: START_HEIGHT,
             was_focused: false,
@@ -78,75 +125,159 @@ impl FlickApp {
         self.launcher.reset();
         self.pending.clear();
         self.was_focused = false;
-        self.background.window.hide();
+        self.services.window.hide();
     }
 
-    /// Draws chips, search box, results and the hint line. Returns the
-    /// effects of a mouse click on a result.
+    fn save_settings(&self) {
+        if let Err(e) = config::save(&self.settings.path, &self.settings.config) {
+            log::error!("could not save {}: {e}", self.settings.path.display());
+        }
+    }
+
+    fn handle_tray(&mut self, ctx: &egui::Context, command: TrayCommand) {
+        match command {
+            TrayCommand::ToggleStartWithWindows => autostart::toggle(),
+            TrayCommand::SetTheme(index) => self.set_theme(ctx, index),
+            TrayCommand::Background(choice) => self.set_background(ctx, choice),
+            TrayCommand::ReloadIndex => (self.services.reindex)(),
+            TrayCommand::Quit => {
+                log::info!("quit from tray");
+                // Remove the tray icon now so Windows does not leave a ghost icon.
+                self.services.tray = None;
+                self.services.hotkey = None;
+                std::process::exit(0);
+            }
+        }
+    }
+
+    fn set_theme(&mut self, ctx: &egui::Context, index: usize) {
+        let Some(palette) = PRESETS.get(index) else {
+            return;
+        };
+        self.palette = palette;
+        theme::apply(ctx, palette);
+        if let Some(tray) = &self.services.tray {
+            tray.show_theme(index);
+        }
+        self.settings.config.appearance.theme = palette.id.to_owned();
+        self.save_settings();
+        log::info!("theme: {}", palette.name);
+    }
+
+    fn set_background(&mut self, ctx: &egui::Context, choice: BackgroundChoice) {
+        let current = BackgroundSource::from_setting(&self.settings.config.appearance.background);
+        let source = match choice {
+            BackgroundChoice::Wallpaper => Some(BackgroundSource::Wallpaper),
+            BackgroundChoice::None => Some(BackgroundSource::None),
+            BackgroundChoice::WindowsPictures => {
+                background::pick_picture(&background::windows_pictures_dir())
+                    .map(BackgroundSource::File)
+            }
+            BackgroundChoice::ChooseFile => {
+                background::pick_picture(&paths::pictures_dir()).map(BackgroundSource::File)
+            }
+        };
+        // Cancelled picker, or a picture that will not load: keep what we had.
+        let applied = source.and_then(|source| {
+            let picture = load_picture(ctx, &source);
+            let wants_picture = source != BackgroundSource::None;
+            (picture.is_some() || !wants_picture).then_some((source, picture))
+        });
+        let shown = match applied {
+            Some((source, picture)) => {
+                self.picture = picture;
+                self.settings.config.appearance.background = source.to_setting();
+                self.save_settings();
+                log::info!("background: {}", source.to_setting());
+                source
+            }
+            None => current,
+        };
+        // The menu flips a tick on click; set the ticks to what is really shown.
+        if let Some(tray) = &self.services.tray {
+            tray.show_background(&shown);
+        }
+    }
+
+    /// Draws the two cards. Returns the effects of a mouse click on a result.
     fn draw(&mut self, ui: &mut egui::Ui) -> Vec<Effect> {
+        let p = self.palette;
+        let fill = if self.picture.is_some() {
+            theme::card_fill(p, self.settings.config.appearance.clamped_tint())
+        } else {
+            p.background
+        };
+        let card = egui::Frame::NONE
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, p.border))
+            .corner_radius(14)
+            .inner_margin(egui::Margin::symmetric(14, 10));
+
         let mut clicked_mode = None;
         let mut clicked_row = None;
+        let mut hovered_row = None;
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let active = self.launcher.effective_mode();
-            for (i, (name, keyword)) in self.launcher.modes().into_iter().enumerate() {
-                if mode_chip(ui, name, keyword, i == active).clicked() {
-                    clicked_mode = Some(i);
+        card.show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let active = self.launcher.effective_mode();
+                for (i, (name, keyword)) in self.launcher.modes().into_iter().enumerate() {
+                    if mode_chip(ui, p, name, keyword, i == active).clicked() {
+                        clicked_mode = Some(i);
+                    }
+                }
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                icon_slot(ui, Icon::Search, ICON_SIZE, p.muted);
+                let placeholder = theme::placeholder(self.launcher.effective_mode_name());
+                let mut text = self.launcher.input().to_owned();
+                let response = ui.add(
+                    TextEdit::singleline(&mut text)
+                        .font(egui::TextStyle::Heading)
+                        .frame(egui::Frame::NONE)
+                        .hint_text(RichText::new(placeholder).color(p.muted))
+                        .desired_width(f32::INFINITY),
+                );
+                // This, not key consumption, is what keeps focus here after Tab.
+                response.request_focus();
+                if response.changed() {
+                    self.launcher.set_input(&text);
+                }
+            });
+        });
+
+        ui.add_space(GAP as f32 * 0.8);
+
+        card.show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let selected = self.launcher.selected();
+            // Moving the mouse over a row selects it; a resting pointer does
+            // not fight the arrow keys.
+            let pointer_moved = ui.input(|i| i.pointer.is_moving());
+            for (i, item) in self.launcher.results().iter().enumerate() {
+                let response = result_row(ui, p, &mut self.icons, item, i == selected);
+                if response.clicked() {
+                    clicked_row = Some(i);
+                } else if pointer_moved && response.hovered() && i != selected {
+                    hovered_row = Some(i);
                 }
             }
-        });
-        ui.add_space(10.0);
-
-        ui.horizontal(|ui| {
-            icon_slot(ui, Icon::Search, 20.0, theme::MUTED);
-            let placeholder = theme::placeholder(self.launcher.effective_mode_name());
-            let mut text = self.launcher.input().to_owned();
-            let response = ui.add(
-                TextEdit::singleline(&mut text)
-                    .font(egui::TextStyle::Heading)
-                    .frame(egui::Frame::NONE)
-                    .hint_text(RichText::new(placeholder).color(theme::MUTED))
-                    .desired_width(f32::INFINITY),
+            if !self.launcher.results().is_empty() {
+                ui.add_space(4.0);
+                let y = ui.cursor().top();
+                ui.painter()
+                    .hline(ui.max_rect().x_range(), y, egui::Stroke::new(1.0, p.border));
+                ui.add_space(6.0);
+            }
+            let typing = !self.launcher.input().trim().is_empty();
+            ui.label(
+                RichText::new(theme::footer(self.launcher.results().len(), typing))
+                    .small()
+                    .color(p.muted),
             );
-            // This, not key consumption, is what keeps focus here after Tab.
-            response.request_focus();
-            if response.changed() {
-                self.launcher.set_input(&text);
-            }
         });
-
-        let selected = self.launcher.selected();
-        // Moving the mouse over a row selects it; a resting pointer does not
-        // fight the arrow keys.
-        let pointer_moved = ui.input(|i| i.pointer.is_moving());
-        let mut hovered_row = None;
-        if !self.launcher.results().is_empty() {
-            ui.add_space(8.0);
-        }
-        for (i, item) in self.launcher.results().iter().enumerate() {
-            let response = result_row(ui, item, i == selected);
-            if response.clicked() {
-                clicked_row = Some(i);
-            } else if pointer_moved && response.hovered() && i != selected {
-                hovered_row = Some(i);
-            }
-        }
-
-        ui.add_space(8.0);
-        let line_y = ui.cursor().top();
-        ui.painter().hline(
-            ui.max_rect().x_range(),
-            line_y,
-            egui::Stroke::new(1.0, theme::BORDER),
-        );
-        ui.add_space(6.0);
-        let typing = !self.launcher.input().trim().is_empty();
-        ui.label(
-            RichText::new(theme::footer(self.launcher.results().len(), typing))
-                .small()
-                .color(theme::MUTED),
-        );
 
         if let Some(i) = hovered_row {
             self.launcher.select(i);
@@ -166,23 +297,29 @@ impl FlickApp {
         let height = content_height.ceil();
         if (height - self.height).abs() >= 1.0 {
             self.height = height;
-            ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WIDTH, height)));
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(WIDTH, height)));
         }
     }
 }
 
 /// Allocates a square of `size` and draws `icon` in it.
-fn icon_slot(ui: &mut egui::Ui, icon: Icon, size: f32, color: egui::Color32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+fn icon_slot(ui: &mut egui::Ui, icon: Icon, size: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(size, size), egui::Sense::hover());
     icon.paint(ui.painter(), rect.shrink(1.0), color);
 }
 
 /// A mode chip: icon, name and its keyword. Clickable.
-fn mode_chip(ui: &mut egui::Ui, name: &str, keyword: &str, active: bool) -> egui::Response {
+fn mode_chip(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    name: &str,
+    keyword: &str,
+    active: bool,
+) -> egui::Response {
     let (fill, stroke, text) = if active {
-        (theme::SELECTED, theme::ACCENT, theme::TEXT)
+        (p.selected, p.accent, p.text)
     } else {
-        (egui::Color32::TRANSPARENT, theme::BORDER, theme::MUTED)
+        (Color32::TRANSPARENT, p.border, p.muted)
     };
     egui::Frame::NONE
         .fill(fill)
@@ -194,7 +331,7 @@ fn mode_chip(ui: &mut egui::Ui, name: &str, keyword: &str, active: bool) -> egui
             ui.horizontal(|ui| {
                 icon_slot(ui, Icon::for_mode(name), 14.0, text);
                 ui.label(RichText::new(name).size(13.0).color(text));
-                ui.label(RichText::new(keyword).size(12.0).color(theme::MUTED));
+                ui.label(RichText::new(keyword).size(12.0).color(p.muted));
             });
         })
         .response
@@ -202,17 +339,59 @@ fn mode_chip(ui: &mut egui::Ui, name: &str, keyword: &str, active: bool) -> egui
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// One result: icon, title and a one-line path, cut short instead of wrapping.
-fn result_row(ui: &mut egui::Ui, item: &ResultItem, selected: bool) -> egui::Response {
+/// Draws a result's icon and returns its kind label ("Google", "Microsoft
+/// Word Document", ...). Files and folders get their real Windows icon.
+fn row_icon(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &mut IconCache,
+    item: &ResultItem,
+    selected: bool,
+) -> String {
+    let fallback = if selected { p.accent } else { p.muted };
+    match (&item.kind, &item.action) {
+        (ResultKind::File | ResultKind::Folder, Action::OpenPath(path)) => {
+            let is_dir = item.kind == ResultKind::Folder;
+            match icons.get(ui.ctx(), path, is_dir) {
+                Some((texture, type_name)) => {
+                    let (id, type_name) = (texture.id(), type_name.clone());
+                    ui.add(egui::Image::new((id, vec2(ICON_SIZE, ICON_SIZE))));
+                    type_name
+                }
+                None => {
+                    icon_slot(ui, Icon::for_kind(item.kind), ICON_SIZE, fallback);
+                    String::new()
+                }
+            }
+        }
+        (ResultKind::Web, Action::OpenUrl(url)) => {
+            let icon = Icon::for_url(url);
+            icon_slot(ui, icon, ICON_SIZE, fallback);
+            match icon {
+                Icon::Google => "Google".into(),
+                Icon::YouTube => "YouTube".into(),
+                _ => "Web".into(),
+            }
+        }
+        _ => {
+            icon_slot(ui, Icon::for_kind(item.kind), ICON_SIZE, fallback);
+            String::new()
+        }
+    }
+}
+
+/// One result: icon, title, a one-line path, and the kind label on the right.
+fn result_row(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &mut IconCache,
+    item: &ResultItem,
+    selected: bool,
+) -> egui::Response {
     let fill = if selected {
-        theme::SELECTED
+        p.selected
     } else {
-        egui::Color32::TRANSPARENT
-    };
-    let icon_color = if selected {
-        theme::ACCENT
-    } else {
-        theme::MUTED
+        Color32::TRANSPARENT
     };
     egui::Frame::NONE
         .fill(fill)
@@ -221,21 +400,26 @@ fn result_row(ui: &mut egui::Ui, item: &ResultItem, selected: bool) -> egui::Res
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                icon_slot(ui, Icon::for_kind(item.kind), 18.0, icon_color);
+                let label = row_icon(ui, p, icons, item, selected);
                 ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    ui.add(
-                        egui::Label::new(RichText::new(&item.title).color(theme::TEXT)).truncate(),
-                    );
-                    if !item.subtitle.is_empty() {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&item.subtitle).small().color(theme::MUTED),
-                            )
-                            .truncate(),
-                        );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if !label.is_empty() {
+                        ui.label(RichText::new(label).small().color(p.muted));
                     }
+                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.add(
+                            egui::Label::new(RichText::new(&item.title).color(p.text)).truncate(),
+                        );
+                        if !item.subtitle.is_empty() {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&item.subtitle).small().color(p.muted),
+                                )
+                                .truncate(),
+                            );
+                        }
+                    });
                 });
             });
         })
@@ -245,22 +429,25 @@ fn result_row(ui: &mut egui::Ui, item: &ResultItem, selected: bool) -> egui::Res
 }
 
 impl eframe::App for FlickApp {
-    /// Runs even while hidden: picks up a finished index and hides the bar
-    /// when the user clicks into another window.
+    /// Runs even while hidden: tray commands, a finished index, a fresh
+    /// show, and hiding when the user clicks into another window.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.background.quit.load(Ordering::Relaxed) {
-            log::info!("quit from tray");
-            // Remove the tray icon now so Windows does not leave a ghost icon.
-            self.background.tray = None;
-            self.background.hotkey = None;
-            std::process::exit(0);
+        let commands = std::mem::take(
+            &mut *self
+                .services
+                .tray_queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+        for command in commands {
+            self.handle_tray(ctx, command);
         }
-        if self.background.shown.swap(false, Ordering::Relaxed) {
+        if self.services.shown.swap(false, Ordering::Relaxed) {
             // Every show starts empty, whatever happened before the last hide.
             self.launcher.reset();
             self.pending.clear();
         }
-        if self.background.index_updated.swap(false, Ordering::Relaxed) {
+        if self.services.index_updated.swap(false, Ordering::Relaxed) {
             self.launcher.refresh();
         }
         let focused = ctx.input(|i| i.viewport().focused) == Some(true);
@@ -288,12 +475,23 @@ impl eframe::App for FlickApp {
                 }
             }
         }
-        let card = egui::Frame::NONE
-            .fill(theme::BACKGROUND)
-            .inner_margin(egui::Margin::same(14))
+
+        let window = ui.max_rect();
+        match &self.picture {
+            Some(picture) => {
+                let uv = background::cover_uv(picture.size(), window.size());
+                ui.painter().image(picture.id(), window, uv, Color32::WHITE);
+            }
+            None => {
+                ui.painter().rect_filled(window, 0, self.palette.background);
+            }
+        }
+
+        let content = egui::Frame::NONE
+            .inner_margin(egui::Margin::same(GAP))
             .show(ui, |ui| self.draw(ui));
-        self.fit_height(&ctx, card.response.rect.height());
-        for effect in card.inner {
+        self.fit_height(&ctx, content.response.rect.height());
+        for effect in content.inner {
             if self.apply(effect) == Visibility::Hidden {
                 return;
             }
@@ -301,7 +499,7 @@ impl eframe::App for FlickApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        theme::BACKGROUND.to_normalized_gamma_f32()
+        self.palette.background.to_normalized_gamma_f32()
     }
 }
 

@@ -1,27 +1,119 @@
-//! Colors, text sizes and the small bits of text the search bar shows.
+//! Theme presets, text sizes and the small bits of text the search bar shows.
 //!
-//! A dark palette in the spirit of look's default Kanagawa theme.
+//! The presets use the published colors of six popular dark themes, the
+//! same family look ships.
 
 use eframe::egui::{self, Color32, FontId, TextStyle};
 
-pub const BACKGROUND: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x28);
-pub const BORDER: Color32 = Color32::from_rgb(0x36, 0x36, 0x46);
-pub const TEXT: Color32 = Color32::from_rgb(0xdc, 0xd7, 0xba);
-pub const MUTED: Color32 = Color32::from_rgb(0x72, 0x71, 0x69);
-pub const ACCENT: Color32 = Color32::from_rgb(0x7e, 0x9c, 0xd8);
-/// Background of the selected row and the active mode chip.
-pub const SELECTED: Color32 = Color32::from_rgb(0x2d, 0x4f, 0x67);
+/// One theme's colors.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Palette {
+    /// Config value, e.g. `"tokyo-night"`.
+    pub id: &'static str,
+    /// Name in the tray menu.
+    pub name: &'static str,
+    pub background: Color32,
+    pub border: Color32,
+    pub text: Color32,
+    pub muted: Color32,
+    pub accent: Color32,
+    /// Background of the selected row and the active mode chip.
+    pub selected: Color32,
+}
 
-/// Sets the dark palette and text sizes once at startup.
-pub fn apply(ctx: &egui::Context) {
+const fn rgb(hex: u32) -> Color32 {
+    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+pub const PRESETS: [Palette; 6] = [
+    Palette {
+        id: "kanagawa",
+        name: "Kanagawa",
+        background: rgb(0x1f1f28),
+        border: rgb(0x363646),
+        text: rgb(0xdcd7ba),
+        muted: rgb(0x727169),
+        accent: rgb(0x7e9cd8),
+        selected: rgb(0x2d4f67),
+    },
+    Palette {
+        id: "tokyo-night",
+        name: "Tokyo Night",
+        background: rgb(0x1a1b26),
+        border: rgb(0x292e42),
+        text: rgb(0xc0caf5),
+        muted: rgb(0x565f89),
+        accent: rgb(0x7aa2f7),
+        selected: rgb(0x283457),
+    },
+    Palette {
+        id: "rose-pine",
+        name: "Rose Pine",
+        background: rgb(0x191724),
+        border: rgb(0x26233a),
+        text: rgb(0xe0def4),
+        muted: rgb(0x6e6a86),
+        accent: rgb(0xc4a7e7),
+        selected: rgb(0x403d52),
+    },
+    Palette {
+        id: "catppuccin-mocha",
+        name: "Catppuccin Mocha",
+        background: rgb(0x1e1e2e),
+        border: rgb(0x313244),
+        text: rgb(0xcdd6f4),
+        muted: rgb(0x6c7086),
+        accent: rgb(0xcba6f7),
+        selected: rgb(0x45475a),
+    },
+    Palette {
+        id: "gruvbox",
+        name: "Gruvbox",
+        background: rgb(0x282828),
+        border: rgb(0x3c3836),
+        text: rgb(0xebdbb2),
+        muted: rgb(0x928374),
+        accent: rgb(0xfabd2f),
+        selected: rgb(0x504945),
+    },
+    Palette {
+        id: "dracula",
+        name: "Dracula",
+        background: rgb(0x282a36),
+        border: rgb(0x44475a),
+        text: rgb(0xf8f8f2),
+        muted: rgb(0x6272a4),
+        accent: rgb(0xbd93f9),
+        selected: rgb(0x44475a),
+    },
+];
+
+/// The preset with this id, or Kanagawa when there is none.
+pub fn palette(id: &str) -> &'static Palette {
+    PRESETS.iter().find(|p| p.id == id).unwrap_or(&PRESETS[0])
+}
+
+pub fn is_known(id: &str) -> bool {
+    PRESETS.iter().any(|p| p.id == id)
+}
+
+/// A card's fill over the background picture: the theme background with
+/// `tint` (0 to 1) as its opacity.
+pub fn card_fill(palette: &Palette, tint: f32) -> Color32 {
+    let [r, g, b, _] = palette.background.to_array();
+    Color32::from_rgba_unmultiplied(r, g, b, (tint.clamp(0.0, 1.0) * 255.0) as u8)
+}
+
+/// Sets the palette and text sizes. Called at startup and on theme change.
+pub fn apply(ctx: &egui::Context, palette: &Palette) {
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = BACKGROUND;
-    visuals.window_fill = BACKGROUND;
-    visuals.extreme_bg_color = BACKGROUND;
-    visuals.override_text_color = Some(TEXT);
-    visuals.selection.bg_fill = SELECTED;
-    visuals.selection.stroke.color = ACCENT;
-    visuals.text_cursor.stroke.color = ACCENT;
+    visuals.panel_fill = palette.background;
+    visuals.window_fill = palette.background;
+    visuals.extreme_bg_color = palette.background;
+    visuals.override_text_color = Some(palette.text);
+    visuals.selection.bg_fill = palette.selected;
+    visuals.selection.stroke.color = palette.accent;
+    visuals.text_cursor.stroke.color = palette.accent;
 
     // Both the light and dark styles, so a light Windows theme changes nothing.
     ctx.all_styles_mut(|style| {
@@ -61,6 +153,38 @@ pub fn footer(result_count: usize, typing: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presets_in_menu_order() {
+        let ids: Vec<_> = PRESETS.iter().map(|p| p.id).collect();
+        assert_eq!(
+            ids,
+            [
+                "kanagawa",
+                "tokyo-night",
+                "rose-pine",
+                "catppuccin-mocha",
+                "gruvbox",
+                "dracula"
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_theme_falls_back_to_kanagawa() {
+        assert_eq!(palette("dracula").name, "Dracula");
+        assert_eq!(palette("no-such-theme").id, "kanagawa");
+        assert!(is_known("rose-pine"));
+        assert!(!is_known("no-such-theme"));
+    }
+
+    #[test]
+    fn card_fill_uses_tint_as_alpha() {
+        let p = palette("kanagawa");
+        let fill = card_fill(p, 0.55);
+        assert_eq!(fill.a(), 140);
+        assert_eq!(card_fill(p, 1.0), p.background);
+    }
 
     #[test]
     fn placeholder_names_the_mode() {

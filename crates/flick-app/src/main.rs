@@ -2,9 +2,11 @@
 
 mod actions;
 mod autostart;
+mod background;
 mod hotkey;
 mod icons;
 mod paths;
+mod shell_icons;
 mod single_instance;
 mod theme;
 mod tray;
@@ -18,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use flick_core::config::{self, Config};
+use flick_core::config::{self, BackgroundSource, Config};
 use flick_core::index::{self, SharedIndex};
 use flick_core::launcher::Launcher;
 
@@ -81,42 +83,6 @@ fn start_logging() {
     }
 }
 
-/// Turns start-with-Windows on at the very first run, and keeps an existing
-/// entry pointing at this exe if Flick has moved.
-fn sync_start_with_windows(first_run: bool) {
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-    let entry = autostart::FLICK;
-    let result = if first_run {
-        log::info!("first run: starting with Windows from {}", exe.display());
-        entry.enable(&exe)
-    } else if entry.is_enabled() && !entry.points_to(&exe) {
-        log::info!("start-with-Windows now points to {}", exe.display());
-        entry.enable(&exe)
-    } else {
-        Ok(())
-    };
-    if let Err(e) = result {
-        log::error!("could not update start-with-Windows: {e}");
-    }
-}
-
-/// The tray checkbox: flip the registry entry to match.
-fn toggle_start_with_windows() {
-    let entry = autostart::FLICK;
-    let result = if entry.is_enabled() {
-        log::info!("start with Windows: off");
-        entry.disable()
-    } else {
-        log::info!("start with Windows: on");
-        std::env::current_exe().and_then(|exe| entry.enable(&exe))
-    };
-    if let Err(e) = result {
-        log::error!("could not change start-with-Windows: {e}");
-    }
-}
-
 fn main() -> eframe::Result {
     let Some(_instance) = single_instance::acquire() else {
         return Ok(());
@@ -129,7 +95,7 @@ fn main() -> eframe::Result {
     if let Some(e) = error {
         log::error!("{}: {e}; using defaults", config_path.display());
     }
-    sync_start_with_windows(first_run);
+    autostart::sync(first_run);
 
     let shared = SharedIndex::default();
     let (registry, default_mode) = config::build_registry(&config, shared.clone())
@@ -171,7 +137,13 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
-            theme::apply(&ctx);
+            let appearance = &config.appearance;
+            if !theme::is_known(&appearance.theme) {
+                log::warn!("unknown theme {:?}, using Kanagawa", appearance.theme);
+            }
+            theme::apply(&ctx, theme::palette(&appearance.theme));
+            let background_source = BackgroundSource::from_setting(&appearance.background);
+            let picture = ui::load_picture(&ctx, &background_source);
             let window = window::WindowHandle::from_creation_context(cc)?;
             window.round_corners();
             let shown = Arc::new(AtomicBool::new(false));
@@ -191,37 +163,48 @@ fn main() -> eframe::Result {
             reindexer.run();
             reindexer.clone().every(config.files.reindex_minutes);
 
-            let quit = Arc::new(AtomicBool::new(false));
+            // Tray clicks are queued and handled by the app on this thread.
+            let tray_queue = ui::TrayQueue::default();
+            let theme_index = theme::PRESETS
+                .iter()
+                .position(|p| p.id == appearance.theme)
+                .unwrap_or(0);
             let tray = {
-                let (reindexer, quit, ctx) = (reindexer.clone(), quit.clone(), ctx.clone());
+                let (queue, ctx) = (tray_queue.clone(), ctx.clone());
                 tray::build(
                     &tray::tooltip(&config.hotkey, hotkey_error.as_deref()),
                     autostart::FLICK.is_enabled(),
-                    move |command| match command {
-                        tray::TrayCommand::ToggleStartWithWindows => toggle_start_with_windows(),
-                        tray::TrayCommand::ReloadIndex => {
-                            reindexer.run();
-                        }
-                        tray::TrayCommand::Quit => {
-                            quit.store(true, Ordering::Relaxed);
-                            ctx.request_repaint();
-                        }
+                    theme_index,
+                    &background_source,
+                    move |command| {
+                        queue
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(command);
+                        ctx.request_repaint();
                     },
                 )
             }
             .inspect_err(|e| log::error!("{e:#}"))
             .ok();
 
+            let services = ui::Services {
+                index_updated: reindexer.updated.clone(),
+                shown,
+                window,
+                hotkey: hotkey.ok(),
+                tray,
+                tray_queue,
+                reindex: Box::new(move || {
+                    reindexer.run();
+                }),
+            };
+            let settings = ui::Settings {
+                config: config.clone(),
+                path: config_path.clone(),
+            };
             Ok(Box::new(ui::FlickApp::new(
-                launcher,
-                ui::Background {
-                    index_updated: reindexer.updated,
-                    quit,
-                    shown,
-                    window,
-                    hotkey: hotkey.ok(),
-                    tray,
-                },
+                launcher, services, settings, picture,
             )))
         }),
     )

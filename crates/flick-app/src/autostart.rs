@@ -63,6 +63,40 @@ impl Entry {
     }
 }
 
+/// Turns start-with-Windows on at the very first run, and keeps an existing
+/// entry pointing at this exe if Flick has moved.
+pub fn sync(first_run: bool) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let result = if first_run {
+        log::info!("first run: starting with Windows from {}", exe.display());
+        FLICK.enable(&exe)
+    } else if FLICK.is_enabled() && !FLICK.points_to(&exe) {
+        log::info!("start-with-Windows now points to {}", exe.display());
+        FLICK.enable(&exe)
+    } else {
+        Ok(())
+    };
+    if let Err(e) = result {
+        log::error!("could not update start-with-Windows: {e}");
+    }
+}
+
+/// The tray checkbox: flip the registry entry.
+pub fn toggle() {
+    let result = if FLICK.is_enabled() {
+        log::info!("start with Windows: off");
+        FLICK.disable()
+    } else {
+        log::info!("start with Windows: on");
+        std::env::current_exe().and_then(|exe| FLICK.enable(&exe))
+    };
+    if let Err(e) = result {
+        log::error!("could not change start-with-Windows: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
