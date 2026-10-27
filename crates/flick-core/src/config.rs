@@ -30,19 +30,19 @@ pub struct Config {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
-    /// Theme preset id, e.g. `"kanagawa"` or `"tokyo-night"`.
-    pub theme: String,
-    /// `"wallpaper"` (your desktop wallpaper), `"none"`, or a path to a picture.
+    /// `"builtin:<id>"` (a picture inside Flick), `"none"`, or a path to a picture.
     pub background: String,
     /// How dark the cards are over the picture, from 0 (clear) to 1 (solid).
     pub tint: f32,
 }
 
+/// The built-in picture used when nothing else is chosen.
+pub const DEFAULT_BUILTIN: &str = "great-wave";
+
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            theme: "kanagawa".into(),
-            background: "wallpaper".into(),
+            background: format!("builtin:{DEFAULT_BUILTIN}"),
             tint: 0.55,
         }
     }
@@ -57,7 +57,8 @@ impl Appearance {
 /// Where the background picture comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackgroundSource {
-    Wallpaper,
+    /// A picture inside Flick, by id (e.g. `"great-wave"`).
+    Builtin(String),
     None,
     File(PathBuf),
 }
@@ -65,15 +66,19 @@ pub enum BackgroundSource {
 impl BackgroundSource {
     pub fn from_setting(setting: &str) -> Self {
         match setting.trim() {
-            "wallpaper" => Self::Wallpaper,
             "" | "none" => Self::None,
-            path => Self::File(PathBuf::from(path)),
+            // Older versions followed the desktop wallpaper.
+            "wallpaper" => Self::Builtin(DEFAULT_BUILTIN.into()),
+            other => match other.strip_prefix("builtin:") {
+                Some(id) => Self::Builtin(id.into()),
+                None => Self::File(PathBuf::from(other)),
+            },
         }
     }
 
     pub fn to_setting(&self) -> String {
         match self {
-            Self::Wallpaper => "wallpaper".into(),
+            Self::Builtin(id) => format!("builtin:{id}"),
             Self::None => "none".into(),
             Self::File(path) => path.display().to_string(),
         }
@@ -274,27 +279,61 @@ mod tests {
     }
 
     #[test]
-    fn appearance_defaults() {
-        let a = Config::default().appearance;
-        assert_eq!(a.theme, "kanagawa");
-        assert_eq!(a.background, "wallpaper");
-        assert_eq!(a.tint, 0.55);
+    fn builtin_backgrounds_round_trip() {
+        let s = BackgroundSource::from_setting("builtin:starry-night");
+        assert_eq!(s, BackgroundSource::Builtin("starry-night".into()));
+        assert_eq!(s.to_setting(), "builtin:starry-night");
     }
 
     #[test]
-    fn background_setting_is_read() {
+    fn old_wallpaper_setting_becomes_the_default_builtin() {
         assert_eq!(
             BackgroundSource::from_setting("wallpaper"),
-            BackgroundSource::Wallpaper
+            BackgroundSource::Builtin("great-wave".into())
         );
+    }
+
+    #[test]
+    fn none_and_paths_still_work() {
         assert_eq!(
             BackgroundSource::from_setting("none"),
             BackgroundSource::None
         );
         assert_eq!(BackgroundSource::from_setting(""), BackgroundSource::None);
         assert_eq!(
-            BackgroundSource::from_setting(r"C:\Pics\hinata.jpg"),
-            BackgroundSource::File(r"C:\Pics\hinata.jpg".into())
+            BackgroundSource::from_setting(r"C:\Pics\a.jpg"),
+            BackgroundSource::File(r"C:\Pics\a.jpg".into())
+        );
+    }
+
+    #[test]
+    fn appearance_defaults() {
+        let a = Config::default().appearance;
+        assert_eq!(
+            (a.background.as_str(), a.tint),
+            ("builtin:great-wave", 0.55)
+        );
+    }
+
+    #[test]
+    fn old_config_with_theme_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "hotkey = \"Ctrl+Space\"
+[appearance]
+theme = \"dracula\"
+background = \"wallpaper\"
+",
+        )
+        .unwrap();
+        let (c, err) = load_or_create(&path);
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(c.hotkey, "Ctrl+Space");
+        assert_eq!(
+            BackgroundSource::from_setting(&c.appearance.background),
+            BackgroundSource::Builtin("great-wave".into())
         );
     }
 
@@ -312,7 +351,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut c = Config::default();
-        c.appearance.theme = "dracula".into();
         c.appearance.background = r"C:\Pics\hinata.jpg".into();
         save(&path, &c).unwrap();
         let (loaded, err) = load_or_create(&path);
