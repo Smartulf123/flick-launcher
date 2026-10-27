@@ -536,40 +536,38 @@ impl FlickApp {
             return;
         };
         let p = self.palette;
-        let current = self
-            .services
-            .hotkey
-            .as_ref()
-            .and_then(Hotkeys::current)
-            .map_or_else(|| "none".to_owned(), |text| display(text, Os::CURRENT));
+        // One row, like the search box: the keys (or a grey prompt) on the
+        // left, a short note on the right.
+        let keys = match capture.candidate.as_deref() {
+            Some(text) => RichText::new(display(text, Os::CURRENT))
+                .text_style(egui::TextStyle::Heading)
+                .color(p.text),
+            None => {
+                let prompt = match self.services.hotkey.as_ref().and_then(Hotkeys::current) {
+                    Some(now) => format!("Press a new hotkey (now {})", display(now, Os::CURRENT)),
+                    None => "Press a new hotkey".to_owned(),
+                };
+                theme::hint(&prompt, p.muted)
+            }
+        };
+        let note = capture
+            .error
+            .as_deref()
+            .or(capture.message)
+            .unwrap_or("Enter to save \u{b7} Esc to cancel");
         let card = self.card();
         let content = egui::Frame::NONE
             .inner_margin(egui::Margin::same(GAP))
             .show(ui, |ui| {
                 card.show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(
-                        RichText::new("Press the keys you want to use")
-                            .heading()
-                            .color(p.text),
-                    );
-                    ui.label(RichText::new(format!("Now: {current}")).color(p.muted));
-                    ui.add_space(10.0);
-                    let picked = capture
-                        .candidate
-                        .as_deref()
-                        .map(|text| display(text, Os::CURRENT));
-                    let shown = picked.unwrap_or_else(|| "...".to_owned());
-                    ui.label(RichText::new(shown).size(26.0).color(p.text));
-                    if let Some(note) = capture.error.as_deref().or(capture.message) {
-                        ui.label(RichText::new(note).color(p.muted));
-                    }
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new("Enter to keep \u{b7} Esc to cancel")
-                            .small()
-                            .color(p.muted),
-                    );
+                    ui.horizontal(|ui| {
+                        icon_slot(ui, Icon::Settings, ICON_SIZE, p.muted);
+                        ui.label(keys);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(RichText::new(note).small().color(p.muted));
+                        });
+                    });
                 });
             });
         self.fit_height(ctx, content.response.rect.height());
@@ -611,7 +609,7 @@ impl FlickApp {
                     TextEdit::singleline(&mut text)
                         .font(egui::TextStyle::Heading)
                         .frame(egui::Frame::NONE)
-                        .hint_text(RichText::new(placeholder).color(p.muted))
+                        .hint_text(theme::hint(&placeholder, p.muted))
                         .desired_width(f32::INFINITY),
                 );
                 // This, not key consumption, is what keeps focus here after Tab.

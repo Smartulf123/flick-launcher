@@ -67,6 +67,14 @@ pub fn apply(ctx: &egui::Context, palette: &Palette) {
     });
 }
 
+/// Grey hint text in the search box's place, such as "Search Google".
+pub fn hint(text: &str, color: egui::Color32) -> egui::RichText {
+    // Same size as typed text, so nothing jumps when typing starts.
+    egui::RichText::new(text)
+        .text_style(TextStyle::Heading)
+        .color(color)
+}
+
 /// Grey text shown in the empty search box.
 pub fn placeholder(mode_name: &str) -> String {
     match mode_name {
@@ -95,6 +103,25 @@ mod tests {
         assert!(fill.a() >= 215, "{}", fill.a());
         assert!(fill.a() > card_fill(&KANAGAWA, 0.55).a());
         assert_eq!(fill.to_opaque(), KANAGAWA.background);
+    }
+
+    #[test]
+    fn grey_hint_text_is_as_big_as_typed_text() {
+        let ctx = egui::Context::default();
+        apply(&ctx, &KANAGAWA);
+        // Fonts exist only after a first frame.
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let style = ctx.global_style();
+        let (hint_height, typed_height) = ctx.fonts_mut(|fonts| {
+            (
+                hint("Search Google", KANAGAWA.muted).font_height(fonts, &style),
+                egui::RichText::new("x")
+                    .text_style(TextStyle::Heading)
+                    .font_height(fonts, &style),
+            )
+        });
+        assert_eq!(hint_height, typed_height);
     }
 
     #[test]
