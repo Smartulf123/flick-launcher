@@ -10,7 +10,7 @@ Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere an
 - **Apps**: find a program you have installed and start it (`spot` starts Spotify). On Windows this is everything in Start's app list, Store apps included, with their own icons; on a Mac the apps in Applications; on Linux the apps in your app menu.
 - **Wikipedia**.
 
-Swap them for any of 23 engines (DuckDuckGo, ChatGPT, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own.
+Swap them for any of 23 engines (DuckDuckGo, ChatGPT, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more).
 
 It runs quietly in the tray (the menu bar on a Mac), starts when you log in, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
@@ -68,7 +68,7 @@ You can also click an engine chip or a result with the mouse. The gear at the to
 
 ### Search engines
 
-Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar, or drag it onto a chip to swap that one out (or into a gap, when the bar has room). Hover a chip and click its **×** to take it off, or pick it up and drag it to a new place; the other chips slide aside to show where it will land. The bar holds one to five engines; to swap one in when it is full, take one off first. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`).
+Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar, or drag it onto a chip to swap that one out (or into a gap, when the bar has room). Hover a chip and click its **×** to take it off, or pick it up and drag it to a new place; the other chips slide aside to show where it will land. The bar holds one to five engines; to swap one in when it is full, take one off first.
 
 | Group | Engines |
 |---|---|
@@ -81,7 +81,7 @@ Click **+** at the end of the engine chips to see every engine, grouped; type to
 | Shopping | Amazon, eBay |
 | Social | Reddit, X, LinkedIn |
 
-Google, YouTube, Wikipedia and DuckDuckGo show suggestions as you type. Wikipedia and Amazon use their English and US sites; add your own country's as a custom engine.
+Google, YouTube, Wikipedia and DuckDuckGo show suggestions as you type. Wikipedia and Amazon use their English and US sites.
 
 ### Your files
 
@@ -107,7 +107,6 @@ Flick creates `config.toml` the first time it runs: in `%APPDATA%\flick` on Wind
 | `hotkey` | `"Alt+Space"` (Linux: `"Ctrl+Alt+Space"`) | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt` (Option on a Mac), `Ctrl`, `Shift`, `Super` (the Windows key, or Cmd on a Mac), e.g. `"Ctrl+Space"`. |
 | `default_mode` | `"google"` | Engine the bar opens in, by its id (`google`, `files`, `github`, ...). If it is not on the bar, the first engine is used. |
 | `engines` | `["google", "youtube", "files", "apps", "wikipedia"]` | The engines on the bar, in order. Easiest to change with **+** on the bar. |
-| `custom_engines` | none | Engines you added: `name` and `url` (with `{query}`). |
 | `max_results` | `8` | Most results shown at once. |
 | `suggestions` | `true` | Suggestions while you type, for Google, YouTube, Wikipedia and DuckDuckGo. |
 | `files.roots` | `[]` | Folders to search. Empty means your Desktop, Documents and Downloads. Example: `roots = ['C:\Users\you\Projects', 'D:\Photos']` |

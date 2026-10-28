@@ -297,3 +297,18 @@ fn main() -> eframe::Result {
         }),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    /// eframe's default features are off, so each one Flick needs is listed
+    /// by hand. Without "clipboard", copy and paste silently do nothing.
+    #[test]
+    fn copy_and_paste_are_built_in() {
+        let manifest = include_str!("../Cargo.toml");
+        let eframe = manifest
+            .lines()
+            .find(|line| line.starts_with("eframe = "))
+            .expect("eframe dependency");
+        assert!(eframe.contains("\"clipboard\""), "{eframe}");
+    }
+}
