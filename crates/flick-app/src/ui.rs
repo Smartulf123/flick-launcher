@@ -1,6 +1,7 @@
 //! The search bar window: a background picture with two floating cards
 //! (search, results), driven by key presses and tray commands.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,7 +16,9 @@ use flick_core::mode::{Action, ResultItem, ResultKind};
 
 use crate::actions::run_action;
 use crate::bar_menu;
-use crate::engine_picker::{self, Picker, PickerAction};
+use crate::chip_layout;
+use crate::engine_picker::{Picker, PickerAction};
+use crate::favicons::{Favicons, Mark};
 use crate::gallery::{Gallery, GalleryAction, Pick, Picks};
 use crate::gallery_loader::{Done, Job, Loader};
 use crate::hotkey::Hotkeys;
@@ -68,6 +71,8 @@ pub struct Services {
     pub build_launcher: Box<dyn Fn(&Config) -> Launcher>,
     /// Background workers for the gallery (search, thumbnails, downloads).
     pub loader: Loader,
+    /// Site logos for engines and web results.
+    pub logos: Favicons,
 }
 
 /// The config as loaded, and where to save changes made from the tray.
@@ -113,9 +118,24 @@ pub struct FlickApp {
     menu_choice: Option<TrayCommand>,
     /// The "+" engine list, while it is open.
     picker: Option<Picker>,
-    /// The chip being dragged to a new place, by position on the bar.
-    dragging: Option<usize>,
+    /// The chip being carried to a new place.
+    dragging: Option<Drag>,
+    /// Where each chip (by engine id) was drawn last frame, relative to the
+    /// row, so chips glide to new places instead of jumping.
+    chip_pos: HashMap<String, egui::Pos2>,
 }
+
+/// A chip picked up by the mouse.
+#[derive(Debug, Clone, Copy)]
+struct Drag {
+    /// Its position on the bar when picked up.
+    from: usize,
+    /// Where on the chip it was grabbed.
+    grab: egui::Vec2,
+}
+
+/// The "+" chip is square.
+const PLUS_SIZE: f32 = chip_layout::HEIGHT;
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
 pub fn load_picture(ctx: &egui::Context, source: &BackgroundSource) -> Option<TextureHandle> {
@@ -158,6 +178,7 @@ impl FlickApp {
             menu_choice: None,
             picker: None,
             dragging: None,
+            chip_pos: HashMap::new(),
         }
     }
 
@@ -726,7 +747,13 @@ impl FlickApp {
                 ui.set_width(ui.available_width());
                 let height = results_height(ui, self.settings.config.max_results);
                 if let Some(picker) = &mut self.picker {
-                    action = picker.draw(ui, p, &self.settings.config, height);
+                    action = picker.draw(
+                        ui,
+                        p,
+                        &self.settings.config,
+                        &mut self.services.logos,
+                        height,
+                    );
                 }
             });
             if let Some(action) = action {
@@ -761,7 +788,14 @@ impl FlickApp {
                 // All results (at most max_results) are shown; the window
                 // slides up if needed rather than the list scrolling.
                 for (i, item) in self.launcher.results().iter().enumerate() {
-                    let response = result_row(ui, p, &mut self.icons, item, i == selected);
+                    let response = result_row(
+                        ui,
+                        p,
+                        &mut self.icons,
+                        &mut self.services.logos,
+                        item,
+                        i == selected,
+                    );
                     if response.clicked() {
                         clicked_row = Some(i);
                     } else if pointer_moved && response.hovered() && i != selected {
@@ -784,8 +818,10 @@ impl FlickApp {
         Vec::new()
     }
 
-    /// The bar's chips and the "+" chip. Sets
-    /// `clicked` for a chip click; returns a removal or a move to save.
+    /// The bar's chips and the "+" chip, placed by hand so a chip can be
+    /// picked up: it follows the pointer while the others slide apart to
+    /// show where it will land. Sets `clicked` for a chip click; returns a
+    /// removal or a move to save.
     fn chip_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -798,16 +834,85 @@ impl FlickApp {
             .into_iter()
             .map(String::from)
             .collect();
+        let ids: Vec<String> = (0..names.len())
+            .map(|i| self.chip_id(i).unwrap_or_else(|| names[i].clone()))
+            .collect();
         let active = self.launcher.active_chip();
         let removable = names.len() > MIN_ENGINES;
-        let pointer = ui.ctx().pointer_interact_pos();
-        let mut rects = Vec::with_capacity(names.len());
+        let ctx = ui.ctx().clone();
+        let max_width = ui.available_width();
+        let widths: Vec<f32> = names.iter().map(|n| chip_width(ui, n)).collect();
+        if self.dragging.is_some_and(|d| d.from >= names.len()) {
+            self.dragging = None;
+        }
+
+        // Where everything belongs this frame (relative to the row's corner).
+        let origin = ui.cursor().min;
+        let pointer = ctx.pointer_interact_pos();
+        let held = self
+            .dragging
+            .zip(pointer)
+            .map(|(drag, at)| (drag, at - origin.to_vec2() - drag.grab));
+        let landing = held.map(|(drag, corner)| {
+            let others: Vec<f32> = (0..widths.len())
+                .filter(|&i| i != drag.from)
+                .map(|i| widths[i])
+                .collect();
+            let slots: Vec<egui::Rect> = chip_layout::place(&others, max_width)
+                .into_iter()
+                .zip(&others)
+                .map(|(at, &w)| chip_layout::rect(at, w))
+                .collect();
+            let centre = corner + vec2(widths[drag.from], chip_layout::HEIGHT) / 2.0;
+            (drag.from, chip_layout::drop_index(&slots, centre))
+        });
+        let places = chip_layout::places_while_dragging(&widths, PLUS_SIZE, landing, max_width);
+        let bottom = places
+            .iter()
+            .map(|at| at.y + chip_layout::HEIGHT)
+            .fold(chip_layout::HEIGHT, f32::max);
+        ui.allocate_rect(
+            egui::Rect::from_min_size(origin, vec2(max_width, bottom)),
+            egui::Sense::hover(),
+        );
+
+        let dt = ui.input(|i| i.stable_dt).min(0.1);
+        let mut moving = held.is_some();
         let mut change = None;
         let mut released = None;
         for (i, name) in names.iter().enumerate() {
-            let response = mode_chip(ui, p, name, Some(i) == active);
-            rects.push(response.rect);
-            let badge = remove_badge(response.rect);
+            let target = places[i];
+            let lifted = held.filter(|(drag, _)| drag.from == i).map(|(_, at)| at);
+            let shown = lifted.unwrap_or_else(|| {
+                let from = self.chip_pos.get(&ids[i]).copied().unwrap_or(target);
+                chip_layout::ease(from, target, dt)
+            });
+            moving |= shown != target;
+            self.chip_pos.insert(ids[i].clone(), shown);
+            let rect = chip_layout::rect(origin + shown.to_vec2(), widths[i]);
+            let response = ui
+                .interact(
+                    rect,
+                    ui.scope_id().with(("chip", &ids[i])),
+                    egui::Sense::click_and_drag(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let mark = Mark::for_engine(
+                &mut self.services.logos,
+                &ctx,
+                &self.settings.config,
+                &ids[i],
+                name,
+            );
+            if lifted.is_some() {
+                let layer =
+                    egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("held chip"));
+                paint_chip(&ctx.layer_painter(layer), p, rect, name, &mark, true, true);
+            } else {
+                paint_chip(ui.painter(), p, rect, name, &mark, Some(i) == active, false);
+            }
+
+            let badge = remove_badge(rect);
             let on_badge = pointer.is_some_and(|pos| badge.contains(pos));
             if removable && response.hovered() && self.dragging.is_none() {
                 let painter = ui.painter();
@@ -831,47 +936,34 @@ impl FlickApp {
                     *clicked = Some(i);
                 }
             }
-            if response.drag_started() {
-                self.dragging = Some(i);
+            if response.drag_started()
+                && let Some(at) = pointer
+            {
+                self.dragging = Some(Drag {
+                    from: i,
+                    grab: at - rect.min,
+                });
             }
             if response.dragged() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
             }
             if response.drag_stopped() {
-                released = self.dragging.take().zip(pointer);
+                released = self.dragging.take();
             }
         }
-        // Worked out once every chip has its place for this frame.
-        if let Some((from, pos)) = released {
-            let centers: Vec<f32> = rects.iter().map(|r| r.center().x).collect();
-            let to = engine_picker::drop_index(&centers, from, pos.x);
-            if to != from {
-                change = Some(ChipChange::Move(from, to));
-            }
+        // Let go: the chip moves to the gap it was hovering over, and eases
+        // from where it was dropped into its new place.
+        if let (Some(_), Some((from, to))) = (released, landing)
+            && from != to
+        {
+            change = Some(ChipChange::Move(from, to));
         }
-        // While dragging, a line shows where the chip will land.
-        if let (Some(from), Some(pos)) = (self.dragging, pointer) {
-            let centers: Vec<f32> = rects.iter().map(|r| r.center().x).collect();
-            let to = engine_picker::drop_index(&centers, from, pos.x);
-            let others: Vec<&egui::Rect> = rects
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| i != from)
-                .map(|(_, r)| r)
-                .collect();
-            let x = match others.get(to) {
-                Some(r) => r.left() - 3.0,
-                None => others
-                    .last()
-                    .map_or(rects[from].left(), |r| r.right() + 3.0),
-            };
-            let (top, bottom) = (rects[from].top(), rects[from].bottom());
-            ui.painter().line_segment(
-                [egui::pos2(x, top), egui::pos2(x, bottom)],
-                egui::Stroke::new(2.0, p.accent),
-            );
+        if moving {
+            ctx.request_repaint();
         }
-        if plus_chip(ui, p, self.picker.is_some()).clicked() {
+
+        let plus = chip_layout::rect(origin + places[names.len()].to_vec2(), PLUS_SIZE);
+        if plus_chip(ui, p, self.picker.is_some(), plus).clicked() {
             self.menu_open = false;
             self.picker = match self.picker {
                 Some(_) => None,
@@ -938,35 +1030,66 @@ fn icon_slot(ui: &mut egui::Ui, icon: Icon, size: f32, color: Color32) {
 }
 
 /// A mode chip: icon and name. Clickable.
-fn mode_chip(ui: &mut egui::Ui, p: &Palette, name: &str, active: bool) -> egui::Response {
-    // Every chip has its own dark backing and bright text; the active one
-    // stands out by its fill and accent outline.
+/// How wide a chip with this name is: padding, mark, gap, name, padding.
+fn chip_width(ui: &egui::Ui, name: &str) -> f32 {
+    let galley = ui.painter().layout_no_wrap(
+        name.to_owned(),
+        egui::FontId::proportional(13.0),
+        Color32::WHITE,
+    );
+    10.0 + 14.0 + 5.0 + galley.size().x + 10.0
+}
+
+/// Draws a chip in `rect`. Every chip has its own dark backing and bright
+/// text; the active one stands out by its fill and accent outline, and a
+/// chip being carried also casts a shadow.
+fn paint_chip(
+    painter: &egui::Painter,
+    p: &Palette,
+    rect: egui::Rect,
+    name: &str,
+    mark: &Mark,
+    active: bool,
+    held: bool,
+) {
     let (fill, stroke) = if active {
         (p.selected, p.accent)
     } else {
         (theme::chip_fill(p), p.border)
     };
-    let text = p.text;
-    egui::Frame::NONE
-        .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .corner_radius(8)
-        .inner_margin(egui::Margin::symmetric(10, 4))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
-            ui.horizontal(|ui| {
-                icon_slot(ui, Icon::for_mode(name), 14.0, text);
-                ui.label(RichText::new(name).size(13.0).color(text));
-            });
-        })
-        .response
-        .interact(egui::Sense::click_and_drag())
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
+    if held {
+        let shadow = egui::Shadow {
+            offset: [0, 4],
+            blur: 14,
+            spread: 0,
+            color: Color32::from_black_alpha(110),
+        };
+        painter.add(shadow.as_shape(rect, 8));
+    }
+    painter.rect_filled(rect, 8, fill);
+    painter.rect_stroke(
+        rect,
+        8,
+        egui::Stroke::new(1.0, stroke),
+        egui::StrokeKind::Inside,
+    );
+    let icon = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 10.0 + 7.0, rect.center().y),
+        vec2(14.0, 14.0),
+    );
+    mark.paint(painter, icon, p.text);
+    painter.text(
+        egui::pos2(icon.right() + 5.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(13.0),
+        p.text,
+    );
 }
 
 /// The "+" at the end of the chips; opens and closes the engine list.
-fn plus_chip(ui: &mut egui::Ui, p: &Palette, open: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(26.0, 26.0), egui::Sense::click());
+fn plus_chip(ui: &mut egui::Ui, p: &Palette, open: bool, rect: egui::Rect) -> egui::Response {
+    let response = ui.interact(rect, ui.scope_id().with("plus chip"), egui::Sense::click());
     let fill = if open || response.hovered() {
         p.selected
     } else {
@@ -1017,6 +1140,7 @@ fn row_icon(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &mut IconCache,
+    logos: &mut Favicons,
     item: &ResultItem,
     selected: bool,
 ) -> String {
@@ -1038,12 +1162,28 @@ fn row_icon(
         }
         (ResultKind::Web, Action::OpenUrl(url)) => {
             let icon = Icon::for_url(url);
-            icon_slot(ui, icon, ICON_SIZE, fallback);
+            let logo = flick_core::catalog::icon_domain(url)
+                .and_then(|domain| logos.get(ui.ctx(), &domain));
+            match logo {
+                Some(texture) => {
+                    ui.add(egui::Image::new((texture.id(), vec2(ICON_SIZE, ICON_SIZE))));
+                }
+                None => icon_slot(ui, icon, ICON_SIZE, fallback),
+            }
             match icon {
                 Icon::Google => "Google".into(),
                 Icon::YouTube => "YouTube".into(),
                 _ => "Web".into(),
             }
+        }
+        (ResultKind::App, Action::Launch(launch)) => {
+            match icons.get_app(ui.ctx(), launch) {
+                Some(texture) => {
+                    ui.add(egui::Image::new((texture.id(), vec2(ICON_SIZE, ICON_SIZE))));
+                }
+                None => icon_slot(ui, Icon::App, ICON_SIZE, fallback),
+            }
+            "App".into()
         }
         _ => {
             icon_slot(ui, Icon::for_kind(item.kind), ICON_SIZE, fallback);
@@ -1068,6 +1208,7 @@ fn result_row(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &mut IconCache,
+    logos: &mut Favicons,
     item: &ResultItem,
     selected: bool,
 ) -> egui::Response {
@@ -1083,7 +1224,7 @@ fn result_row(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                let label = row_icon(ui, p, icons, item, selected);
+                let label = row_icon(ui, p, icons, logos, item, selected);
                 ui.add_space(4.0);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if !label.is_empty() {

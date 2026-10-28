@@ -10,7 +10,7 @@ static SHELL_LOCK: Mutex<()> = Mutex::new(());
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
-    GetObjectW, HGDIOBJ, ReleaseDC,
+    GetObjectW, HBITMAP, HGDIOBJ, ReleaseDC,
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
@@ -62,10 +62,15 @@ thread_local! {
     };
 }
 
+/// Makes sure COM is set up on this thread before a shell call.
+pub(super) fn com_ready() {
+    COM_READY.with(|_| ());
+}
+
 /// Asks the shell for the 32x32 icon and type name. Per-type icons are
 /// looked up by extension only, so OneDrive files are never downloaded.
 pub fn lookup(path: &Path, is_dir: bool) -> Option<ShellIcon> {
-    COM_READY.with(|_| ());
+    com_ready();
     // The shell's icon list misbehaves when two threads use it at once
     // (success with no icon). One lookup at a time, process-wide.
     let _one_at_a_time = SHELL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -128,18 +133,25 @@ fn icon_to_image(icon: HICON) -> Option<ColorImage> {
         return None;
     }
 
+    let image = bitmap_to_image(info.hbmColor, false);
+    free_bitmaps();
+    image
+}
+
+/// A 32-bit bitmap's pixels as an egui image. Bitmaps from the shell's
+/// image factory have their alpha `premultiplied`; icon bitmaps do not.
+pub(super) fn bitmap_to_image(bitmap_handle: HBITMAP, premultiplied: bool) -> Option<ColorImage> {
     let mut bitmap = BITMAP::default();
     // SAFETY: `bitmap` is the right size for a BITMAP description.
     let got = unsafe {
         GetObjectW(
-            HGDIOBJ(info.hbmColor.0),
+            HGDIOBJ(bitmap_handle.0),
             size_of::<BITMAP>() as i32,
             Some(std::ptr::from_mut(&mut bitmap).cast()),
         )
     };
     let (w, h) = (bitmap.bmWidth, bitmap.bmHeight);
     if got == 0 || w <= 0 || h <= 0 {
-        free_bitmaps();
         return None;
     }
 
@@ -161,7 +173,7 @@ fn icon_to_image(icon: HICON) -> Option<ColorImage> {
         let dc = GetDC(None);
         let lines = GetDIBits(
             dc,
-            info.hbmColor,
+            bitmap_handle,
             0,
             h as u32,
             Some(pixels.as_mut_ptr().cast()),
@@ -171,15 +183,16 @@ fn icon_to_image(icon: HICON) -> Option<ColorImage> {
         ReleaseDC(None, dc);
         lines
     };
-    free_bitmaps();
     if lines == 0 {
         return None;
     }
     bgra_to_rgba(&mut pixels);
-    Some(ColorImage::from_rgba_unmultiplied(
-        [w as usize, h as usize],
-        &pixels,
-    ))
+    let size = [w as usize, h as usize];
+    Some(if premultiplied {
+        ColorImage::from_rgba_premultiplied(size, &pixels)
+    } else {
+        ColorImage::from_rgba_unmultiplied(size, &pixels)
+    })
 }
 
 /// Icon textures and type names, looked up once per key.
@@ -205,6 +218,21 @@ impl IconCache {
                 Some((texture, icon.type_name))
             })
             .as_ref()
+    }
+
+    /// The icon of the app started by `launch` (an `AppsFolder` parsing
+    /// name), or `None` if Windows has none.
+    pub fn get_app(&mut self, ctx: &egui::Context, launch: &str) -> Option<&TextureHandle> {
+        let key = format!("app:{launch}");
+        self.entries
+            .entry(key.clone())
+            .or_insert_with(|| {
+                let image = super::apps::icon(launch)?;
+                let texture = ctx.load_texture(key, image, TextureOptions::LINEAR);
+                Some((texture, "App".to_owned()))
+            })
+            .as_ref()
+            .map(|(texture, _)| texture)
     }
 }
 

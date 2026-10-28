@@ -1,6 +1,6 @@
 //! Small icons drawn with egui's painter, so the app ships no icon font or images.
 
-use eframe::egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
+use eframe::egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 use flick_core::mode::ResultKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,6 +14,8 @@ pub enum Icon {
     File,
     Folder,
     Info,
+    /// An installed program: four tiles.
+    App,
     /// A gear, for the settings button.
     Settings,
 }
@@ -76,6 +78,7 @@ impl Icon {
             ResultKind::Web => Icon::Web,
             ResultKind::File => Icon::File,
             ResultKind::Folder => Icon::Folder,
+            ResultKind::App => Icon::App,
             ResultKind::Info => Icon::Info,
         }
     }
@@ -86,6 +89,7 @@ impl Icon {
             "Google" => Icon::Google,
             "YouTube" => Icon::YouTube,
             "Files" => Icon::Folder,
+            "Apps" => Icon::App,
             _ => Icon::Web,
         }
     }
@@ -196,6 +200,12 @@ impl Icon {
                 painter.circle_stroke(c, s * 0.30, stroke);
                 painter.circle_stroke(c, s * 0.11, stroke);
             }
+            Icon::App => {
+                for (x, y) in [(0.12, 0.12), (0.54, 0.12), (0.12, 0.54), (0.54, 0.54)] {
+                    let tile = Rect::from_min_size(at(x, y), vec2(s * 0.34, s * 0.34));
+                    painter.rect_stroke(tile, s * 0.08, stroke, StrokeKind::Inside);
+                }
+            }
             Icon::Info => {
                 painter.circle_stroke(r.center(), s * 0.40, stroke);
                 painter.line_segment([at(0.50, 0.44), at(0.50, 0.72)], stroke);
@@ -237,6 +247,7 @@ mod tests {
         assert_eq!(Icon::for_kind(ResultKind::File), Icon::File);
         assert_eq!(Icon::for_kind(ResultKind::Web), Icon::Web);
         assert_eq!(Icon::for_kind(ResultKind::Info), Icon::Info);
+        assert_eq!(Icon::for_kind(ResultKind::App), Icon::App);
     }
 
     #[test]
@@ -244,6 +255,7 @@ mod tests {
         assert_eq!(Icon::for_mode("Google"), Icon::Google);
         assert_eq!(Icon::for_mode("YouTube"), Icon::YouTube);
         assert_eq!(Icon::for_mode("Files"), Icon::Folder);
+        assert_eq!(Icon::for_mode("Apps"), Icon::App);
         // Every other engine is a website.
         assert_eq!(Icon::for_mode("GitHub"), Icon::Web);
     }
