@@ -1,6 +1,6 @@
 [package]
 name = "flick-app"
-description = "Flick: a keyboard launcher for Windows 11"
+description = "Flick: a keyboard launcher for Windows, macOS and Linux"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -50,12 +50,13 @@ tempfile = "3"
 [package.metadata.packager]
 product-name = "Flick"
 identifier = "io.github.smartulf123.flick"
-description = "A fast keyboard launcher: search Google, YouTube and your files"
+description = "A fast keyboard launcher: search the web, your files and your apps"
 long-description = """
-Press a hotkey anywhere and a small search bar appears. Search Google
-and YouTube with suggestions as you type, or your own Desktop,
-Documents and Downloads with fuzzy matching. Lives in the tray, starts
-at login, and sits on a background picture you choose."""
+Press a hotkey anywhere and a small search bar appears. Search the web
+with the engines you choose (Google, YouTube, Wikipedia, ChatGPT, GitHub
+and more, or your own), find files in your Desktop, Documents and
+Downloads, or start an installed app. Lives in the tray, starts at
+login, and sits on a background picture you choose."""
 homepage = "https://github.com/Smartulf123/flick-launcher"
 authors = ["Kasper Aune Dahl"]
 category = "Utility"
