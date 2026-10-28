@@ -22,9 +22,16 @@ pub fn shell_target(parsing_name: &str) -> String {
     format!("shell:AppsFolder\\{parsing_name}")
 }
 
-/// Starts the app, desktop or Store, without waiting for it.
+/// Starts the app, desktop or Store, without waiting for it. Explorer is
+/// the shell's own way in, and quicker than `open`'s PowerShell route.
 pub fn launch(parsing_name: &str) -> std::io::Result<()> {
-    open::that_detached(shell_target(parsing_name))
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("explorer.exe")
+        .arg(shell_target(parsing_name))
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(drop)
 }
 
 /// Every app in Start, filtered by `flick_core::apps::windows_apps`. Runs
