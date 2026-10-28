@@ -9,12 +9,13 @@ use eframe::egui::{
     self, Align, Color32, Key, Layout, Modifiers, RichText, TextEdit, TextureHandle,
     TextureOptions, ViewportCommand, vec2,
 };
-use flick_core::config::{self, BackgroundSource, Config};
+use flick_core::config::{self, BackgroundSource, Config, MIN_ENGINES};
 use flick_core::launcher::{Effect, Intent, Launcher};
 use flick_core::mode::{Action, ResultItem, ResultKind};
 
 use crate::actions::run_action;
 use crate::bar_menu;
+use crate::engine_picker::{self, Picker, PickerAction};
 use crate::gallery::{Gallery, GalleryAction, Pick, Picks};
 use crate::gallery_loader::{Done, Job, Loader};
 use crate::hotkey::Hotkeys;
@@ -110,6 +111,13 @@ pub struct FlickApp {
     menu_open: bool,
     /// A row of that menu was clicked this frame.
     menu_choice: Option<TrayCommand>,
+    /// The "+" engine list, while it is open.
+    picker: Option<Picker>,
+    /// The chip being dragged to a new place, by position on the bar.
+    dragging: Option<usize>,
+    /// Flick changed the typed text itself (a shortcut, Backspace back);
+    /// put the cursor at its end.
+    cursor_to_end: bool,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -151,6 +159,9 @@ impl FlickApp {
             visible: false,
             menu_open: false,
             menu_choice: None,
+            picker: None,
+            dragging: None,
+            cursor_to_end: false,
         }
     }
 
@@ -175,6 +186,8 @@ impl FlickApp {
         self.was_focused = false;
         self.close_capture();
         self.menu_open = false;
+        self.picker = None;
+        self.dragging = None;
         self.visible = false;
         self.services.window.hide();
     }
@@ -182,6 +195,7 @@ impl FlickApp {
     /// Opens the "Change hotkey" view, with the hotkey paused meanwhile.
     fn open_capture(&mut self, ctx: &egui::Context) {
         self.close_gallery(ctx);
+        self.picker = None;
         self.launcher.reset();
         self.pending.clear();
         if let Some(hotkeys) = &self.services.hotkey {
@@ -228,6 +242,34 @@ impl FlickApp {
                     capture.error = Some(format!("{e:#}"));
                 }
             }
+        }
+    }
+
+    /// Changes the bar's engines, saves the settings and rebuilds the bar
+    /// with them, keeping what was typed.
+    fn change_engines(&mut self, change: impl FnOnce(&mut Config)) {
+        change(&mut self.settings.config);
+        self.save_settings();
+        let text = self.launcher.input().to_owned();
+        self.launcher = (self.services.build_launcher)(&self.settings.config);
+        if self.picker.is_none() && !text.is_empty() {
+            self.launcher.set_input(&text);
+        }
+    }
+
+    fn picker_action(&mut self, action: PickerAction) {
+        match action {
+            PickerAction::Add(id) => self.change_engines(|c| {
+                if let Err(e) = c.add_engine(&id) {
+                    log::warn!("could not add {id}: {e:?}");
+                }
+            }),
+            PickerAction::AddCustom(engine) => {
+                log::info!("added engine {} ({})", engine.name, engine.shortcut);
+                self.change_engines(|c| c.add_custom(engine));
+            }
+            PickerAction::DeleteCustom(id) => self.change_engines(|c| c.remove_custom(&id)),
+            PickerAction::Close => self.picker = None,
         }
     }
 
@@ -313,6 +355,7 @@ impl FlickApp {
             paths::cache_dir(),
             self.services.loader.generations(),
         ));
+        self.picker = None;
         self.launcher.reset();
         self.pending.clear();
 
@@ -395,6 +438,15 @@ impl FlickApp {
             self.close_gallery(ctx);
             return;
         }
+        // Backspace in the empty box goes back from an engine reached by shortcut.
+        if self.picker.is_none()
+            && self.launcher.input().is_empty()
+            && ctx.input(|i| i.key_pressed(Key::Backspace))
+        {
+            self.launcher.handle(Intent::BackspaceOnEmpty);
+            self.cursor_to_end = true;
+        }
+
         let window = ui.max_rect();
         self.paint_background(ui, window);
         let mover = ui.interact(
@@ -612,6 +664,7 @@ impl FlickApp {
         let card = self.card();
 
         let mut clicked_mode = None;
+        let mut chip_change = None;
         let mut clicked_row = None;
         let mut hovered_row = None;
 
@@ -619,12 +672,13 @@ impl FlickApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let active = self.launcher.active_chip();
-                for (i, name) in self.launcher.chips().into_iter().enumerate() {
-                    if mode_chip(ui, p, name, Some(i) == active).clicked() {
-                        clicked_mode = Some(i);
-                    }
-                }
+                // The chips wrap to a second line rather than run under the gear.
+                let row = vec2(ui.available_width() - 34.0, 0.0);
+                let wrap = Layout::left_to_right(Align::Center).with_main_wrap(true);
+                ui.allocate_ui_with_layout(row, wrap, |ui| {
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    chip_change = self.chip_row(ui, p, &mut clicked_mode);
+                });
                 // Settings: the same Theme and Background menu as right-click.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if settings_button(ui, p).clicked() {
@@ -636,8 +690,16 @@ impl FlickApp {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 icon_slot(ui, Icon::Search, ICON_SIZE, p.muted);
-                let placeholder = theme::placeholder(self.launcher.active_mode_name());
-                let mut text = self.launcher.input().to_owned();
+                let picking = self.picker.is_some();
+                let placeholder = if picking {
+                    "Filter engines\u{2026}".to_owned()
+                } else {
+                    theme::placeholder(self.launcher.active_mode_name())
+                };
+                let mut text = match &self.picker {
+                    Some(picker) => picker.filter.clone(),
+                    None => self.launcher.input().to_owned(),
+                };
                 let response = ui.add(
                     TextEdit::singleline(&mut text)
                         .font(egui::TextStyle::Heading)
@@ -646,17 +708,59 @@ impl FlickApp {
                         .desired_width(f32::INFINITY),
                 );
                 // This, not key consumption, is what keeps focus here after Tab.
-                response.request_focus();
+                // The form's own fields keep the focus while it is open.
+                if !self.picker.as_ref().is_some_and(Picker::form_open) {
+                    response.request_focus();
+                }
                 if response.secondary_clicked() {
                     // Opened at the start of the next frame, with the bar drawn.
                     self.wants_bar_menu = true;
                     ui.ctx().request_repaint();
                 }
                 if response.changed() {
-                    self.launcher.set_input(&text);
+                    match &mut self.picker {
+                        Some(picker) => picker.set_filter(&text),
+                        None => {
+                            self.launcher.set_input(&text);
+                            // A shortcut was taken out of the text.
+                            self.cursor_to_end |= self.launcher.input() != text;
+                        }
+                    }
+                }
+                if std::mem::take(&mut self.cursor_to_end) {
+                    let end = self.launcher.input().chars().count();
+                    if let Some(mut state) =
+                        egui::text_edit::TextEditState::load(ui.ctx(), response.id)
+                    {
+                        let cursor = egui::text::CCursor::new(end);
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
+                        state.store(ui.ctx(), response.id);
+                    }
                 }
             });
         });
+
+        if let Some(change) = chip_change {
+            self.apply_chip_change(change);
+        }
+
+        // The engine list takes the place of the results while open.
+        if self.picker.is_some() {
+            ui.add_space(GAP as f32 * 0.8);
+            let mut action = None;
+            card.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if let Some(picker) = &mut self.picker {
+                    action = picker.draw(ui, p, &self.settings.config);
+                }
+            });
+            if let Some(action) = action {
+                self.picker_action(action);
+            }
+            return Vec::new();
+        }
 
         // The in-bar gear menu takes the place of the results while open.
         if self.menu_open {
@@ -707,6 +811,127 @@ impl FlickApp {
         Vec::new()
     }
 
+    /// The bar's chips, the shortcut engine in use and the "+" chip. Sets
+    /// `clicked` for a chip click; returns a removal or a move to save.
+    fn chip_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        clicked: &mut Option<usize>,
+    ) -> Option<ChipChange> {
+        let names: Vec<String> = self
+            .launcher
+            .chips()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let active = self.launcher.active_chip();
+        let removable = names.len() > MIN_ENGINES;
+        let pointer = ui.ctx().pointer_interact_pos();
+        let mut rects = Vec::with_capacity(names.len());
+        let mut change = None;
+        let mut released = None;
+        for (i, name) in names.iter().enumerate() {
+            let response = mode_chip(ui, p, name, Some(i) == active);
+            rects.push(response.rect);
+            let badge = remove_badge(response.rect);
+            let on_badge = pointer.is_some_and(|pos| badge.contains(pos));
+            if removable && response.hovered() && self.dragging.is_none() {
+                let painter = ui.painter();
+                painter.circle_filled(
+                    badge.center(),
+                    7.0,
+                    if on_badge { p.warning } else { p.border },
+                );
+                painter.text(
+                    badge.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "\u{d7}",
+                    egui::FontId::proportional(12.0),
+                    p.text,
+                );
+            }
+            if response.clicked() {
+                if removable && on_badge {
+                    change = Some(ChipChange::Remove(i));
+                } else {
+                    *clicked = Some(i);
+                }
+            }
+            if response.drag_started() {
+                self.dragging = Some(i);
+            }
+            if response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+            if response.drag_stopped() {
+                released = self.dragging.take().zip(pointer);
+            }
+        }
+        // Worked out once every chip has its place for this frame.
+        if let Some((from, pos)) = released {
+            let centers: Vec<f32> = rects.iter().map(|r| r.center().x).collect();
+            let to = engine_picker::drop_index(&centers, from, pos.x);
+            if to != from {
+                change = Some(ChipChange::Move(from, to));
+            }
+        }
+        // While dragging, a line shows where the chip will land.
+        if let (Some(from), Some(pos)) = (self.dragging, pointer) {
+            let centers: Vec<f32> = rects.iter().map(|r| r.center().x).collect();
+            let to = engine_picker::drop_index(&centers, from, pos.x);
+            let others: Vec<&egui::Rect> = rects
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| i != from)
+                .map(|(_, r)| r)
+                .collect();
+            let x = match others.get(to) {
+                Some(r) => r.left() - 3.0,
+                None => others
+                    .last()
+                    .map_or(rects[from].left(), |r| r.right() + 3.0),
+            };
+            let (top, bottom) = (rects[from].top(), rects[from].bottom());
+            ui.painter().line_segment(
+                [egui::pos2(x, top), egui::pos2(x, bottom)],
+                egui::Stroke::new(2.0, p.accent),
+            );
+        }
+        if let Some(name) = self.launcher.visiting() {
+            visiting_chip(ui, p, name);
+        }
+        if plus_chip(ui, p, self.picker.is_some()).clicked() {
+            self.menu_open = false;
+            self.picker = match self.picker {
+                Some(_) => None,
+                None => Some(Picker::default()),
+            };
+        }
+        change
+    }
+
+    fn apply_chip_change(&mut self, change: ChipChange) {
+        let Some(id) = self.chip_id(match change {
+            ChipChange::Remove(i) | ChipChange::Move(i, _) => i,
+        }) else {
+            return;
+        };
+        match change {
+            ChipChange::Remove(_) => self.change_engines(|c| {
+                if let Err(e) = c.remove_engine(&id) {
+                    log::warn!("could not remove {id}: {e:?}");
+                }
+            }),
+            ChipChange::Move(from, to) => self.change_engines(|c| c.move_engine(from, to)),
+        }
+    }
+
+    /// The settings id of the chip at `position` on the bar.
+    fn chip_id(&self, position: usize) -> Option<String> {
+        self.settings.config.chips().get(position).cloned()
+    }
+
     /// Resizes the window to the height the content actually used.
     /// Resizes the window to the height the content actually used, sliding
     /// it up if the new height would run past the bottom of the screen.
@@ -727,6 +952,13 @@ impl FlickApp {
             )));
         }
     }
+}
+
+/// A change made on the chip row, by position on the bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChipChange {
+    Remove(usize),
+    Move(usize, usize),
 }
 
 /// Allocates a square of `size` and draws `icon` in it.
@@ -758,8 +990,58 @@ fn mode_chip(ui: &mut egui::Ui, p: &Palette, name: &str, active: bool) -> egui::
             });
         })
         .response
-        .interact(egui::Sense::click())
+        .interact(egui::Sense::click_and_drag())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The engine reached by shortcut, shown after the chips while in use.
+fn visiting_chip(ui: &mut egui::Ui, p: &Palette, name: &str) {
+    egui::Frame::NONE
+        .fill(theme::chip_fill(p))
+        .stroke(egui::Stroke::new(1.0, p.accent))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            ui.horizontal(|ui| {
+                icon_slot(ui, Icon::for_mode(name), 14.0, p.accent);
+                ui.label(RichText::new(name).size(13.0).color(p.accent));
+            });
+        })
+        .response
+        .on_hover_text("Reached by shortcut; Tab goes back to your engines");
+}
+
+/// The "+" at the end of the chips; opens and closes the engine list.
+fn plus_chip(ui: &mut egui::Ui, p: &Palette, open: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(26.0, 26.0), egui::Sense::click());
+    let fill = if open || response.hovered() {
+        p.selected
+    } else {
+        theme::chip_fill(p)
+    };
+    ui.painter().rect_filled(rect, 8, fill);
+    ui.painter().rect_stroke(
+        rect,
+        8,
+        egui::Stroke::new(1.0, p.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "+",
+        egui::FontId::proportional(17.0),
+        p.text,
+    );
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Add or find engines")
+}
+
+/// The remove mark in a hovered chip's top-right corner.
+fn remove_badge(chip: egui::Rect) -> egui::Rect {
+    egui::Rect::from_center_size(chip.right_top() + vec2(-3.0, 3.0), vec2(14.0, 14.0))
 }
 
 /// The gear at the end of the chip row; opens Theme and Background.
@@ -915,6 +1197,7 @@ impl eframe::App for FlickApp {
             self.close_gallery(ctx);
             // Every show starts empty, whatever happened before the last hide.
             self.launcher.reset();
+            self.picker = None;
             self.pending.clear();
         }
         if self.services.results_changed.swap(false, Ordering::Relaxed) {
@@ -938,7 +1221,9 @@ impl eframe::App for FlickApp {
             self.gallery_ui(ui, &ctx);
             return;
         }
-        let keys = read_intents(&ctx);
+        // The form's fields move with Tab, so it is left to them.
+        let form_open = self.picker.as_ref().is_some_and(Picker::form_open);
+        let keys = read_intents(&ctx, form_open);
         self.pending.extend(keys.intents);
         if keys.after_text {
             // Let the text box take this frame's typing first; run the keys next frame.
@@ -947,6 +1232,13 @@ impl eframe::App for FlickApp {
             for intent in std::mem::take(&mut self.pending) {
                 // Esc closes the in-bar menu first.
                 if intent == Intent::Escape && std::mem::take(&mut self.menu_open) {
+                    continue;
+                }
+                // The open engine list takes the keys; Esc closes it, not the bar.
+                if let Some(picker) = &mut self.picker {
+                    if let Some(action) = picker.handle(intent, &self.settings.config) {
+                        self.picker_action(action);
+                    }
                     continue;
                 }
                 for effect in self.launcher.handle(intent) {
@@ -1060,7 +1352,9 @@ pub struct FrameKeys {
 
 /// Takes the launcher's keys out of the input queue before any widget sees
 /// them, so the text box never loses focus to Tab.
-pub fn read_intents(ctx: &egui::Context) -> FrameKeys {
+/// With `keep_tab`, Tab is left for the focused widget (to move between
+/// a form's fields).
+pub fn read_intents(ctx: &egui::Context, keep_tab: bool) -> FrameKeys {
     ctx.input_mut(|input| {
         let mut keys = FrameKeys::default();
         let mut seen_text = false;
@@ -1074,7 +1368,7 @@ pub fn read_intents(ctx: &egui::Context) -> FrameKeys {
                 pressed: true,
                 modifiers,
                 ..
-            } => match intent_for(*key, *modifiers) {
+            } => match intent_for(*key, *modifiers).filter(|_| !(keep_tab && *key == Key::Tab)) {
                 Some(intent) => {
                     if keys.intents.is_empty() {
                         keys.after_text = seen_text;
@@ -1144,13 +1438,17 @@ mod tests {
     }
 
     fn keys_for(events: Vec<Event>) -> FrameKeys {
+        keys_keeping_tab(events, false)
+    }
+
+    fn keys_keeping_tab(events: Vec<Event>, keep_tab: bool) -> FrameKeys {
         let ctx = egui::Context::default();
         let raw = RawInput {
             events,
             ..Default::default()
         };
         let mut out = FrameKeys::default();
-        ctx.run_ui(raw, |ui| out = read_intents(ui.ctx()))
+        ctx.run_ui(raw, |ui| out = read_intents(ui.ctx(), keep_tab))
             .textures_delta
             .clear();
         out
@@ -1158,6 +1456,18 @@ mod tests {
 
     fn intents_for(events: Vec<Event>) -> Vec<Intent> {
         keys_for(events).intents
+    }
+
+    #[test]
+    fn a_form_keeps_tab_for_its_fields() {
+        let keys = keys_keeping_tab(
+            vec![
+                press(Key::Tab, Modifiers::NONE),
+                press(Key::Enter, Modifiers::NONE),
+            ],
+            true,
+        );
+        assert_eq!(keys.intents, vec![Intent::Enter]);
     }
 
     #[test]
@@ -1224,7 +1534,7 @@ mod tests {
         let mut output = ctx.run_ui(raw, |ui| {
             // What actually keeps focus in the text box is `request_focus()` in
             // `draw`; this only checks that no widget sees the Tab press.
-            read_intents(ui.ctx());
+            read_intents(ui.ctx(), false);
             still_there = ui.ctx().input(|i| i.key_pressed(Key::Tab));
         });
         output.textures_delta.clear();

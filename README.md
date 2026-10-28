@@ -2,11 +2,14 @@
 
 **A fast keyboard launcher for Windows, macOS and Linux, written in Rust.**
 
-Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. Flick searches three places:
+Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. You choose which search engines sit on the bar (up to six); out of the box:
 
 - **Google**: Enter opens a Google search in your default browser, with suggestions as you type.
 - **YouTube**: the same, for YouTube search results.
 - **Files**: fuzzy search over your own Desktop, Documents and Downloads folders as you type (`bdgt` finds `budget_2026.xlsx`). On Windows, files and folders show their real Windows icons.
+- **Wikipedia** and **ChatGPT**.
+
+Swap them for any of 23 engines (DuckDuckGo, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own, and reach every one of them with a short shortcut, such as `gh egui` for GitHub.
 
 It runs quietly in the tray (the menu bar on a Mac), starts when you log in, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
@@ -54,13 +57,31 @@ The macOS and Linux versions are new and have not been tried by hand on every se
 |---|---|
 | **Alt+Space** (Mac: Option+Space, Linux: Ctrl+Alt+Space) | Show or hide the bar |
 | Type, then **Enter** | Search, or open the selected file |
-| **Tab** / **Shift+Tab** | Switch between Google, YouTube and Files |
+| **Tab** / **Shift+Tab** | Switch between the engines on the bar |
+| A shortcut and a space, e.g. `gh egui` | Search that engine, even one not on the bar (**Backspace** in the empty box goes back) |
 | **↑** / **↓** | Pick a result |
 | **Esc**, or click elsewhere | Hide the bar |
 | Drag the edges of the bar | Move it |
 | Gear → **Change hotkey...** | Pick your own hotkey: press the keys, then Enter |
 
-You can also click a mode chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows** (**Open at Login** on a Mac, **Start at login** on Linux), **Background**, **Change hotkey...**, **Reload index** (scans your folders again right away) and **Quit**. On a Mac and on Linux the gear opens the same choices inside the bar.
+You can also click an engine chip or a result with the mouse. The gear at the top right (or right-clicking the bar) opens the background menu. The tray icon has **Start with Windows** (**Open at Login** on a Mac, **Start at login** on Linux), **Background**, **Change hotkey...**, **Reload index** (scans your folders again right away) and **Quit**. On a Mac and on Linux the gear opens the same choices inside the bar.
+
+### Search engines
+
+Click **+** at the end of the engine chips to see every engine, grouped, with its shortcut; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar. Hover a chip and click its **×** to take it off, or drag it to a new place. The bar holds one to six engines. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`) and a shortcut.
+
+| Group | Engines (shortcut) |
+|---|---|
+| On this PC | Files (`fi`) |
+| Web search | Google (`gg`), DuckDuckGo (`ddg`), Bing (`bi`), Brave (`brv`) |
+| AI | ChatGPT (`gpt`), Claude (`cl`), Perplexity (`pp`) |
+| Video & music | YouTube (`yt`), Spotify (`sp`), Twitch (`tw`) |
+| Knowledge | Wikipedia (`wp`), Maps (`mp`), Translate (`tr`) |
+| Code | GitHub (`gh`), Stack Overflow (`st`), MDN (`mdn`), docs.rs (`rs`) |
+| Shopping | Amazon (`amz`), eBay (`eb`) |
+| Social | Reddit (`rd`), X (`xx`), LinkedIn (`li`) |
+
+Google, YouTube, Wikipedia and DuckDuckGo show suggestions as you type. Wikipedia and Amazon use their English and US sites; add your own country's as a custom engine.
 
 ### Your files
 
@@ -84,22 +105,24 @@ Flick creates `config.toml` the first time it runs: in `%APPDATA%\flick` on Wind
 | Setting | Default | What it does |
 |---|---|---|
 | `hotkey` | `"Alt+Space"` (Linux: `"Ctrl+Alt+Space"`) | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt` (Option on a Mac), `Ctrl`, `Shift`, `Super` (the Windows key, or Cmd on a Mac), e.g. `"Ctrl+Space"`. |
-| `default_mode` | `"google"` | Mode the bar opens in: `google`, `youtube` or `files`. |
+| `default_mode` | `"google"` | Engine the bar opens in, by its id (`google`, `files`, `github`, ...). If it is not on the bar, the first engine is used. |
+| `engines` | `["google", "youtube", "files", "wikipedia", "chatgpt"]` | The engines on the bar, in order. Easiest to change with **+** on the bar. |
+| `custom_engines` | none | Engines you added: `name`, `url` (with `{query}`) and `shortcut`. |
 | `max_results` | `8` | Most results shown at once. |
-| `suggestions` | `true` | Google and YouTube suggestions while you type. |
+| `suggestions` | `true` | Suggestions while you type, for Google, YouTube, Wikipedia and DuckDuckGo. |
 | `files.roots` | `[]` | Folders to search. Empty means your Desktop, Documents and Downloads. Example: `roots = ['C:\Users\you\Projects', 'D:\Photos']` |
 | `files.exclude_dir_names` | `.git`, `node_modules`, `target`, `$RECYCLE.BIN` | Folder names skipped, with everything inside them. |
 | `files.reindex_minutes` | `30` | How often the file index is rebuilt. `0` turns it off. |
 | `appearance.background` | `"builtin:great-wave"` | Set from the gear menu: `builtin:<name>`, `none`, or a path to a picture. |
 | `appearance.tint` | `0.55` | How dark the bar is over the picture, from `0` (clear) to `1` (solid). |
 
-Choosing a background from the menu saves it into this file (comments you added are not kept). A broken settings file never stops Flick: it uses the defaults and writes what went wrong to `flick.log` in the same folder.
+Choosing a background or changing the engines on the bar saves it into this file (comments you added are not kept). A broken settings file never stops Flick: it uses the defaults and writes what went wrong to `flick.log` in the same folder.
 
 ## Privacy
 
 Flick has no account, no telemetry and no tracking. It only goes online for these:
 
-- **Search suggestions**: what you type in Google or YouTube mode is sent to Google's suggestion service, as a browser's search box does. Set `suggestions = false` to turn this off.
+- **Search suggestions**: what you type in Google or YouTube is sent to Google's suggestion service, in Wikipedia to Wikipedia's and in DuckDuckGo to DuckDuckGo's, as a browser's search box does. Other engines get nothing until you press Enter. Set `suggestions = false` to turn this off.
 - **The online gallery**: searches and pictures come from wallhaven.cc, only while the gallery's online tab is open.
 
 Your file index stays in memory on your PC and is never sent anywhere.
@@ -125,12 +148,16 @@ Every line is Rust: no Electron, Tauri, webview or JavaScript. The window is [eg
 
 It is light: a single program of about 10 MB that uses no CPU while hidden and about 80 MB of memory with a 150,000-file index (most of that is the index).
 
-### Adding a mode
+### Adding an engine
+
+A website is one line in `CATALOG` in `crates/flick-core/src/catalog.rs`: id, name, group, shortcut and the search address with `{query}`.
+
+Anything else is a mode:
 
 1. Add a file in `crates/flick-core/src/modes/` with a type that implements `SearchMode` (`id`, `name`, `query`).
-2. Register it in `config::build_registry`; it joins the Tab order and gets a chip.
+2. Give it a `Target` in the catalog and register it in `config::build_modes_with`; it can then go on the bar and has a shortcut.
 
-Each mode returns results with a title, subtitle, score and an action (`OpenUrl`, `OpenPath` or `None`). Ideas: apps, Windows settings, a calculator, GitHub.
+Each mode returns results with a title, subtitle, score and an action (`OpenUrl`, `OpenPath` or `None`). Ideas: apps, Windows settings, a calculator.
 
 ## Credits
 

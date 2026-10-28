@@ -4,6 +4,7 @@ mod actions;
 mod background;
 mod bar_menu;
 mod builtin_backgrounds;
+mod engine_picker;
 mod gallery;
 mod gallery_loader;
 mod hotkey;

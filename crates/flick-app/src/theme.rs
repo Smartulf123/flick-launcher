@@ -13,6 +13,8 @@ pub struct Palette {
     pub accent: Color32,
     /// Background of the selected row and the active mode chip.
     pub selected: Color32,
+    /// Warnings and refusals (Kanagawa's orange).
+    pub warning: Color32,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -27,6 +29,7 @@ pub const KANAGAWA: Palette = Palette {
     muted: rgb(0x727169),
     accent: rgb(0x7e9cd8),
     selected: rgb(0x2d4f67),
+    warning: rgb(0xffa066),
 };
 
 /// A card's fill over the background picture: the theme background with
