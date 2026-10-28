@@ -68,7 +68,7 @@ You can also click an engine chip or a result with the mouse. The gear at the to
 
 ### Search engines
 
-Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar. Hover a chip and click its **×** to take it off, or pick it up and drag it to a new place; the other chips slide aside to show where it will land. The bar holds one to five engines; to swap one in when it is full, take one off first. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`).
+Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar, or drag it onto a chip to swap that one out (or into a gap, when the bar has room). Hover a chip and click its **×** to take it off, or pick it up and drag it to a new place; the other chips slide aside to show where it will land. The bar holds one to five engines; to swap one in when it is full, take one off first. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`).
 
 | Group | Engines |
 |---|---|

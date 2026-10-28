@@ -91,17 +91,38 @@ impl Config {
 
     /// Puts engine `id` at the end of the bar.
     pub fn add_engine(&mut self, id: &str) -> Result<(), EngineChange> {
-        let mut chips = self.chips();
+        self.insert_engine(usize::MAX, id)
+    }
+
+    /// The bar's engines, if `id` is a known engine that is not on it yet.
+    fn chips_without(&self, id: &str) -> Result<Vec<String>, EngineChange> {
+        let chips = self.chips();
         if !self.knows_engine(id) {
             return Err(EngineChange::Unknown);
         }
         if chips.iter().any(|c| c == id) {
             return Err(EngineChange::AlreadyThere);
         }
+        Ok(chips)
+    }
+
+    /// Puts engine `id` on the bar at position `at` (or at the end), if
+    /// there is room.
+    pub fn insert_engine(&mut self, at: usize, id: &str) -> Result<(), EngineChange> {
+        let mut chips = self.chips_without(id)?;
         if chips.len() >= MAX_ENGINES {
             return Err(EngineChange::Full);
         }
-        chips.push(id.to_owned());
+        chips.insert(at.min(chips.len()), id.to_owned());
+        self.engines = chips;
+        Ok(())
+    }
+
+    /// Puts engine `id` on the bar in place of the engine at `at`.
+    pub fn replace_engine(&mut self, at: usize, id: &str) -> Result<(), EngineChange> {
+        let mut chips = self.chips_without(id)?;
+        let slot = chips.get_mut(at).ok_or(EngineChange::Unknown)?;
+        *slot = id.to_owned();
         self.engines = chips;
         Ok(())
     }
@@ -626,6 +647,43 @@ background = \"wallpaper\"
     fn a_settings_file_from_before_engines_gets_the_default_five() {
         let c: Config = toml::from_str("hotkey = \"Alt+Space\"\n").unwrap();
         assert_eq!(c.chips(), DEFAULT_ENGINES);
+    }
+
+    #[test]
+    fn an_engine_can_be_dropped_into_a_gap_while_there_is_room() {
+        let mut c = Config::default();
+        assert_eq!(c.insert_engine(1, "reddit"), Err(EngineChange::Full));
+        c.remove_engine("wikipedia").unwrap();
+        assert_eq!(
+            c.insert_engine(1, "google"),
+            Err(EngineChange::AlreadyThere)
+        );
+        assert_eq!(c.insert_engine(1, "nope"), Err(EngineChange::Unknown));
+        assert_eq!(c.insert_engine(1, "reddit"), Ok(()));
+        assert_eq!(c.chips(), ["google", "reddit", "youtube", "files", "apps"]);
+        c.remove_engine("reddit").unwrap();
+        assert_eq!(c.insert_engine(99, "reddit"), Ok(()));
+        assert_eq!(c.chips().last().map(String::as_str), Some("reddit"));
+    }
+
+    #[test]
+    fn an_engine_can_take_a_chips_place() {
+        let mut c = Config::default();
+        assert_eq!(c.replace_engine(2, "reddit"), Ok(()));
+        assert_eq!(
+            c.chips(),
+            ["google", "youtube", "reddit", "apps", "wikipedia"]
+        );
+        assert_eq!(
+            c.replace_engine(0, "youtube"),
+            Err(EngineChange::AlreadyThere)
+        );
+        assert_eq!(c.replace_engine(0, "nope"), Err(EngineChange::Unknown));
+        assert_eq!(c.replace_engine(9, "bing"), Err(EngineChange::Unknown));
+        assert_eq!(
+            c.chips(),
+            ["google", "youtube", "reddit", "apps", "wikipedia"]
+        );
     }
 
     #[test]
