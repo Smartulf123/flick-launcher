@@ -9,6 +9,9 @@ pub enum Action {
     OpenUrl(String),
     /// Open a file or folder with its default program.
     OpenPath(PathBuf),
+    /// Start an installed program; what the text means depends on the
+    /// system (see `apps::AppEntry::launch`).
+    Launch(String),
     /// Informational row; Enter does nothing.
     None,
 }
@@ -19,6 +22,8 @@ pub enum ResultKind {
     Web,
     File,
     Folder,
+    /// An installed program.
+    App,
     /// A message row, such as "Indexing files...".
     Info,
 }

@@ -1,5 +1,6 @@
 //! Windows: Win32 calls, the registry and the shell.
 
+pub mod apps;
 pub mod autostart;
 pub mod instance;
 mod menu;

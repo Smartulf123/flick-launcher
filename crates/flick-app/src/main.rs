@@ -151,7 +151,12 @@ fn main() -> eframe::Result {
     let build_launcher = {
         let shared = shared.clone();
         move |config: &config::Config| {
-            let modes = config::build_modes_with(config, shared.clone(), Some(suggestions.clone()));
+            let modes = config::build_modes_with(
+                config,
+                shared.clone(),
+                Default::default(),
+                Some(suggestions.clone()),
+            );
             Launcher::new(modes, config.max_results)
         }
     };

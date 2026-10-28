@@ -480,10 +480,11 @@ mod tests {
     fn without_a_filter_every_group_is_listed_then_add_your_own() {
         let list = names(&rows(&Config::default(), ""));
         assert_eq!(
-            list[..4],
+            list[..5],
             [
                 "# On this PC",
                 "Files \u{2713}",
+                "Apps \u{2713}",
                 "# Web search",
                 "Google \u{2713}"
             ]
@@ -496,7 +497,7 @@ mod tests {
     #[test]
     fn own_engines_get_their_own_heading() {
         let mut c = Config::default();
-        c.remove_engine("chatgpt").unwrap();
+        c.remove_engine("wikipedia").unwrap();
         c.add_custom(crates());
         let list = names(&rows(&c, ""));
         assert_eq!(
@@ -527,7 +528,7 @@ mod tests {
     fn enter_adds_the_selected_engine() {
         // Room for one more: the default five fill the bar.
         let mut c = Config::default();
-        c.remove_engine("chatgpt").unwrap();
+        c.remove_engine("wikipedia").unwrap();
         let mut picker = Picker::default();
         assert_eq!(
             picker.handle(Intent::Enter, &c),

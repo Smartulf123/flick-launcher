@@ -7,6 +7,7 @@
 //! - `instance`: one Flick at a time (`acquire`, `send`).
 //! - `BarWindow`: showing, hiding and placing the bar.
 //! - `IconCache`: file icons and type names, where the system has them.
+//! - `apps`: listing and starting installed programs.
 //! - `show_native_menu`: the gear menu as a system pop-up, where possible.
 //! - `configure`: system-specific window options.
 //! - `with_tray_icon`: sets the tray icon (a template image on macOS).
@@ -39,7 +40,7 @@ pub enum SystemShortcut {
 mod win;
 #[cfg(windows)]
 pub use win::{
-    BarWindow, IconCache, apply_system_shortcut, autostart, configure, instance, paths,
+    BarWindow, IconCache, apply_system_shortcut, apps, autostart, configure, instance, paths,
     show_native_menu, system_shortcut, with_tray_icon,
 };
 
@@ -47,8 +48,8 @@ pub use win::{
 mod unix;
 #[cfg(unix)]
 pub use unix::{
-    BarWindow, IconCache, apply_system_shortcut, autostart, configure, instance, show_native_menu,
-    system_shortcut, with_tray_icon,
+    BarWindow, IconCache, apply_system_shortcut, apps, autostart, configure, instance,
+    show_native_menu, system_shortcut, with_tray_icon,
 };
 #[cfg(unix)]
 pub use unix_paths as paths;

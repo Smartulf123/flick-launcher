@@ -58,6 +58,8 @@ impl Group {
 pub enum Target {
     /// The file index on this computer.
     Files,
+    /// The installed programs.
+    Apps,
     /// A website: `url` with `{query}` where the text goes, and whose
     /// suggestions to show while typing, if any.
     Web {
@@ -98,6 +100,7 @@ use Group::*;
 #[rustfmt::skip]
 pub const CATALOG: &[EngineSpec] = &[
     EngineSpec { id: "files", name: "Files", group: OnThisPc, target: Target::Files },
+    EngineSpec { id: "apps", name: "Apps", group: OnThisPc, target: Target::Apps },
     web("google", "Google", WebSearch, "https://www.google.com/search?q={query}", Some(Engine::Google)),
     web("duckduckgo", "DuckDuckGo", WebSearch, "https://duckduckgo.com/?q={query}", Some(Engine::DuckDuckGo)),
     web("bing", "Bing", WebSearch, "https://www.bing.com/search?q={query}", None),
@@ -251,13 +254,14 @@ mod tests {
 
     #[test]
     fn catalog_has_the_agreed_engines_in_group_order() {
-        assert_eq!(CATALOG.len(), 23);
+        assert_eq!(CATALOG.len(), 24);
         let groups: Vec<_> = CATALOG.iter().map(|e| e.group).collect();
         let mut sorted = groups.clone();
         sorted.sort_by_key(|g| GROUPS.iter().position(|x| x == g));
         assert_eq!(groups, sorted);
         assert_eq!(find("github").unwrap().name, "GitHub");
         assert_eq!(find("files").unwrap().target, Target::Files);
+        assert_eq!(find("apps").unwrap().target, Target::Apps);
         assert!(find("nope").is_none());
     }
 

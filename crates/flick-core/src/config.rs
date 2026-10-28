@@ -5,10 +5,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::apps::SharedApps;
 use crate::catalog::{self, CustomEngine, Target};
 use crate::index::SharedIndex;
 use crate::modes::suggest::Suggestions;
-use crate::modes::{FilesMode, WebSearchMode};
+use crate::modes::{AppsMode, FilesMode, WebSearchMode};
 use crate::registry::{ModeRegistry, Modes};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,7 +39,7 @@ pub const MIN_ENGINES: usize = 1;
 pub const MAX_ENGINES: usize = 5;
 
 /// The engines a new settings file starts with.
-pub const DEFAULT_ENGINES: [&str; 5] = ["google", "youtube", "files", "wikipedia", "chatgpt"];
+pub const DEFAULT_ENGINES: [&str; 5] = ["google", "youtube", "files", "apps", "wikipedia"];
 
 /// Why an engine could not be added to or removed from the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,8 +273,8 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
 
 /// Registers every engine (the catalog, then custom engines) and works
 /// out the bar's engines and the engine the bar opens in.
-pub fn build_modes(config: &Config, index: SharedIndex) -> Modes {
-    build_modes_with(config, index, None)
+pub fn build_modes(config: &Config, index: SharedIndex, apps: SharedApps) -> Modes {
+    build_modes_with(config, index, apps, None)
 }
 
 /// Like `build_modes`, giving engines that have type-ahead their
@@ -281,6 +282,7 @@ pub fn build_modes(config: &Config, index: SharedIndex) -> Modes {
 pub fn build_modes_with(
     config: &Config,
     index: SharedIndex,
+    apps: SharedApps,
     suggestions: Option<Suggestions>,
 ) -> Modes {
     let suggestions = suggestions.filter(|_| config.suggestions);
@@ -288,11 +290,12 @@ pub fn build_modes_with(
     for spec in catalog::CATALOG {
         match (spec.target, WebSearchMode::from_spec(spec)) {
             (Target::Files, _) => registry.register(Box::new(FilesMode::new(index.clone()))),
+            (Target::Apps, _) => registry.register(Box::new(AppsMode::new(apps.clone()))),
             (_, Some(mode)) => registry.register(Box::new(match &suggestions {
                 Some(s) => mode.with_suggestions(s.clone()),
                 None => mode,
             })),
-            (_, None) => unreachable!("every catalog engine is a website or Files"),
+            (_, None) => unreachable!("every catalog engine is a website, Files or Apps"),
         }
     }
     for custom in &config.custom_engines {
@@ -358,6 +361,7 @@ mod tests {
         let m = build_modes_with(
             &Config::default(),
             Default::default(),
+            Default::default(),
             Some(suggestions(&recorder)),
         );
         for &chip in &m.chips {
@@ -376,7 +380,12 @@ mod tests {
             suggestions: false,
             ..Config::default()
         };
-        let m = build_modes_with(&config, Default::default(), Some(suggestions(&recorder)));
+        let m = build_modes_with(
+            &config,
+            Default::default(),
+            Default::default(),
+            Some(suggestions(&recorder)),
+        );
         m.registry.mode(m.default).query("rust", 8);
         assert!(recorder.0.lock().unwrap().is_empty());
     }
@@ -526,7 +535,7 @@ background = \"wallpaper\"
             default_mode: "bing".into(),
             ..Config::default()
         };
-        let m = build_modes(&c, Default::default());
+        let m = build_modes(&c, Default::default(), Default::default());
         assert_eq!(m.default, m.chips[0]);
         assert_eq!(m.registry.mode(m.default).id(), "google");
     }
@@ -537,11 +546,11 @@ background = \"wallpaper\"
 
     #[test]
     fn every_engine_is_registered_and_the_default_five_are_on_the_bar() {
-        let m = build_modes(&Config::default(), Default::default());
+        let m = build_modes(&Config::default(), Default::default(), Default::default());
         assert_eq!(m.registry.len(), catalog::CATALOG.len());
         assert_eq!(
             chip_ids(&m),
-            ["google", "youtube", "files", "wikipedia", "chatgpt"]
+            ["google", "youtube", "files", "apps", "wikipedia"]
         );
         assert_eq!(m.registry.mode(m.default).id(), "google");
     }
@@ -556,9 +565,9 @@ background = \"wallpaper\"
     #[test]
     fn custom_engines_are_registered_after_the_catalog() {
         let mut c = Config::default();
-        c.remove_engine("chatgpt").unwrap();
+        c.remove_engine("wikipedia").unwrap();
         c.add_custom(crates());
-        let m = build_modes(&c, Default::default());
+        let m = build_modes(&c, Default::default(), Default::default());
         assert_eq!(m.registry.len(), catalog::CATALOG.len() + 1);
         assert_eq!(chip_ids(&m).last(), Some(&"custom:crates"));
     }
@@ -594,7 +603,7 @@ background = \"wallpaper\"
         assert_eq!(c.add_engine("nope"), Err(EngineChange::Unknown));
         // The default five fill the bar.
         assert_eq!(c.add_engine("github"), Err(EngineChange::Full));
-        c.remove_engine("chatgpt").unwrap();
+        c.remove_engine("wikipedia").unwrap();
         assert_eq!(c.add_engine("github"), Ok(()));
         assert_eq!(c.chips().last().map(String::as_str), Some("github"));
         assert_eq!(c.add_engine("bing"), Err(EngineChange::Full));
@@ -618,24 +627,24 @@ background = \"wallpaper\"
         c.move_engine(0, 2);
         assert_eq!(
             c.chips(),
-            ["youtube", "files", "google", "wikipedia", "chatgpt"]
+            ["youtube", "files", "google", "apps", "wikipedia"]
         );
         c.move_engine(4, 0);
         assert_eq!(
             c.chips(),
-            ["chatgpt", "youtube", "files", "google", "wikipedia"]
+            ["wikipedia", "youtube", "files", "google", "apps"]
         );
         c.move_engine(1, 99);
         assert_eq!(
             c.chips(),
-            ["chatgpt", "files", "google", "wikipedia", "youtube"]
+            ["wikipedia", "files", "google", "apps", "youtube"]
         );
     }
 
     #[test]
     fn custom_engines_join_the_bar_when_there_is_room_and_leave_with_delete() {
         let mut c = Config::default();
-        c.remove_engine("chatgpt").unwrap();
+        c.remove_engine("wikipedia").unwrap();
         c.add_custom(crates());
         assert_eq!(c.chips().len(), 5);
         let mut second = crates();

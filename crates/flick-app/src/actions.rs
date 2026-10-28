@@ -8,6 +8,7 @@ pub fn run_action(action: &Action) -> std::io::Result<()> {
     match action {
         Action::OpenUrl(url) => open::that_detached(url),
         Action::OpenPath(path) => open::that_detached(path),
+        Action::Launch(target) => crate::platform::apps::launch(target),
         Action::None => Ok(()),
     }
 }

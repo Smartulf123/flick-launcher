@@ -1,6 +1,7 @@
 //! macOS and Linux. They share almost everything; what differs is chosen
 //! inside each file.
 
+pub mod apps;
 pub mod autostart;
 mod icons;
 pub mod instance;
