@@ -17,7 +17,7 @@ serde_json = "1"
 url = "2"
 # x11 and not wayland: on Linux the bar always runs on X11 (XWayland under
 # Wayland), where it can be placed, kept on top and kept out of the taskbar.
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["clipboard", "default_fonts", "glow", "x11"] }
 open = "5"
 global-hotkey = "0.9"
 log = "0.4"
