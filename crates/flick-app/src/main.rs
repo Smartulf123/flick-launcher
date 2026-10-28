@@ -146,15 +146,15 @@ fn main() -> eframe::Result {
     };
 
     let shared = SharedIndex::default();
-    let (registry, default_mode) =
-        config::build_registry_with(&config, shared.clone(), Some(suggestions));
-    if registry.index_of(&config.default_mode).is_none() {
-        log::warn!(
-            "unknown default_mode {:?}, using the first mode",
-            config.default_mode
-        );
-    }
-    let launcher = Launcher::new(registry, default_mode, config.max_results);
+    // Also used to rebuild the bar after its engines change.
+    let build_launcher = {
+        let shared = shared.clone();
+        move |config: &config::Config| {
+            let modes = config::build_modes_with(config, shared.clone(), Some(suggestions.clone()));
+            Launcher::new(modes, config.max_results)
+        }
+    };
+    let launcher = build_launcher(&config);
 
     let roots = if config.files.roots.is_empty() {
         platform::paths::default_roots()
@@ -249,6 +249,7 @@ fn main() -> eframe::Result {
                 reindex: Box::new(move || {
                     reindexer.run();
                 }),
+                build_launcher: Box::new(build_launcher),
                 loader: gallery_loader::Loader::start({
                     let ctx = ctx.clone();
                     move || ctx.request_repaint()

@@ -1,4 +1,4 @@
-//! Fetches Google and YouTube suggestions on a background thread, waiting
+//! Fetches search suggestions on a background thread, waiting
 //! for a pause in typing so one request goes out per pause, not per key.
 
 use std::sync::mpsc;

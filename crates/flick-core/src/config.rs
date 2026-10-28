@@ -5,24 +5,128 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{self, CustomEngine, Target};
 use crate::index::SharedIndex;
 use crate::modes::suggest::Suggestions;
 use crate::modes::{FilesMode, WebSearchMode};
-use crate::registry::ModeRegistry;
+use crate::registry::{ModeRegistry, Modes};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Global hotkey, e.g. `"Alt+Space"` or `"Ctrl+Space"`.
     pub hotkey: String,
-    /// Mode shown when the bar opens: `"google"`, `"youtube"` or `"files"`.
+    /// Engine the bar opens in, by id (e.g. `"google"`); the first engine
+    /// on the bar when it is not one of them.
     pub default_mode: String,
     pub max_results: usize,
-    /// Show Google and YouTube suggestions while typing. Sends what you
-    /// type to Google, as a browser search box does.
+    /// Show suggestions while typing (Google, YouTube, Wikipedia,
+    /// DuckDuckGo). Sends what you type to that engine, as a browser
+    /// search box does.
     pub suggestions: bool,
+    /// The engines on the bar, by id, in Tab order (1 to 6). Use `chips()`
+    /// for the cleaned list.
+    pub engines: Vec<String>,
     pub files: FilesConfig,
     pub appearance: Appearance,
+    /// Engines people added themselves.
+    pub custom_engines: Vec<CustomEngine>,
+}
+
+/// The bar holds at least one engine and at most six.
+pub const MIN_ENGINES: usize = 1;
+pub const MAX_ENGINES: usize = 6;
+
+/// The engines a new settings file starts with.
+pub const DEFAULT_ENGINES: [&str; 5] = ["google", "youtube", "files", "wikipedia", "chatgpt"];
+
+/// Why an engine could not be added to or removed from the bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineChange {
+    /// Already six engines.
+    Full,
+    /// It is the only engine left.
+    LastOne,
+    /// No engine has that id.
+    Unknown,
+    AlreadyThere,
+}
+
+impl Config {
+    /// Whether `id` names a catalog engine or one of the custom engines.
+    pub fn knows_engine(&self, id: &str) -> bool {
+        catalog::find(id).is_some() || self.custom_engines.iter().any(|c| c.id() == id)
+    }
+
+    /// The bar's engines: unknown ids and repeats dropped, at most six;
+    /// the default list if nothing is left.
+    pub fn chips(&self) -> Vec<String> {
+        let mut chips: Vec<String> = Vec::new();
+        for id in &self.engines {
+            if self.knows_engine(id) && !chips.contains(id) && chips.len() < MAX_ENGINES {
+                chips.push(id.clone());
+            }
+        }
+        if chips.is_empty() {
+            chips = DEFAULT_ENGINES.map(String::from).to_vec();
+        }
+        chips
+    }
+
+    /// Puts engine `id` at the end of the bar.
+    pub fn add_engine(&mut self, id: &str) -> Result<(), EngineChange> {
+        let mut chips = self.chips();
+        if !self.knows_engine(id) {
+            return Err(EngineChange::Unknown);
+        }
+        if chips.iter().any(|c| c == id) {
+            return Err(EngineChange::AlreadyThere);
+        }
+        if chips.len() >= MAX_ENGINES {
+            return Err(EngineChange::Full);
+        }
+        chips.push(id.to_owned());
+        self.engines = chips;
+        Ok(())
+    }
+
+    /// Takes engine `id` off the bar (it stays reachable by shortcut).
+    pub fn remove_engine(&mut self, id: &str) -> Result<(), EngineChange> {
+        let mut chips = self.chips();
+        let Some(at) = chips.iter().position(|c| c == id) else {
+            return Err(EngineChange::Unknown);
+        };
+        if chips.len() <= MIN_ENGINES {
+            return Err(EngineChange::LastOne);
+        }
+        chips.remove(at);
+        self.engines = chips;
+        Ok(())
+    }
+
+    /// Moves the engine at position `from` on the bar to position `to`.
+    pub fn move_engine(&mut self, from: usize, to: usize) {
+        let mut chips = self.chips();
+        if from < chips.len() {
+            let id = chips.remove(from);
+            chips.insert(to.min(chips.len()), id);
+        }
+        self.engines = chips;
+    }
+
+    /// Adds a checked custom engine, and puts it on the bar if there is room.
+    pub fn add_custom(&mut self, engine: CustomEngine) {
+        let id = engine.id();
+        self.custom_engines.push(engine);
+        let _ = self.add_engine(&id);
+    }
+
+    /// Deletes a custom engine and takes it off the bar.
+    pub fn remove_custom(&mut self, id: &str) {
+        let chips: Vec<String> = self.chips().into_iter().filter(|c| c != id).collect();
+        self.custom_engines.retain(|c| c.id() != id);
+        self.engines = chips;
+    }
 }
 
 /// How the bar looks.
@@ -111,8 +215,10 @@ impl Default for Config {
             default_mode: "google".into(),
             max_results: 8,
             suggestions: true,
+            engines: DEFAULT_ENGINES.map(String::from).to_vec(),
             files: FilesConfig::default(),
             appearance: Appearance::default(),
+            custom_engines: Vec::new(),
         }
     }
 }
@@ -164,30 +270,52 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Registers the built-in modes in Tab order (Google, YouTube, Files) and
-/// returns the index of `default_mode`, or 0 when it names no mode.
-pub fn build_registry(config: &Config, index: SharedIndex) -> (ModeRegistry, usize) {
-    build_registry_with(config, index, None)
+/// Registers every engine (the catalog, then custom engines) and works
+/// out the bar's engines, the shortcuts and the engine the bar opens in.
+pub fn build_modes(config: &Config, index: SharedIndex) -> Modes {
+    build_modes_with(config, index, None)
 }
 
-/// Like `build_registry`, giving the web modes suggestions when
-/// `config.suggestions` is on and a source is given.
-pub fn build_registry_with(
+/// Like `build_modes`, giving engines that have type-ahead their
+/// suggestions when `config.suggestions` is on and a source is given.
+pub fn build_modes_with(
     config: &Config,
     index: SharedIndex,
     suggestions: Option<Suggestions>,
-) -> (ModeRegistry, usize) {
+) -> Modes {
     let suggestions = suggestions.filter(|_| config.suggestions);
-    let web = |mode: WebSearchMode| match &suggestions {
-        Some(s) => mode.with_suggestions(s.clone()),
-        None => mode,
-    };
     let mut registry = ModeRegistry::new();
-    registry.register(Box::new(web(WebSearchMode::google())));
-    registry.register(Box::new(web(WebSearchMode::youtube())));
-    registry.register(Box::new(FilesMode::new(index)));
-    let default = registry.index_of(&config.default_mode).unwrap_or(0);
-    (registry, default)
+    let mut shortcuts = Vec::new();
+    for spec in catalog::CATALOG {
+        shortcuts.push((spec.shortcut.to_owned(), registry.len()));
+        match (spec.target, WebSearchMode::from_spec(spec)) {
+            (Target::Files, _) => registry.register(Box::new(FilesMode::new(index.clone()))),
+            (_, Some(mode)) => registry.register(Box::new(match &suggestions {
+                Some(s) => mode.with_suggestions(s.clone()),
+                None => mode,
+            })),
+            (_, None) => unreachable!("every catalog engine is a website or Files"),
+        }
+    }
+    for custom in &config.custom_engines {
+        shortcuts.push((custom.shortcut.clone(), registry.len()));
+        registry.register(Box::new(WebSearchMode::custom(custom)));
+    }
+    let chips: Vec<usize> = config
+        .chips()
+        .iter()
+        .filter_map(|id| registry.index_of(id))
+        .collect();
+    let default = registry
+        .index_of(&config.default_mode)
+        .filter(|i| chips.contains(i))
+        .unwrap_or(chips[0]);
+    Modes {
+        registry,
+        chips,
+        shortcuts,
+        default,
+    }
 }
 
 #[cfg(test)]
@@ -231,16 +359,17 @@ mod tests {
     #[test]
     fn web_modes_get_suggestions_when_on() {
         let recorder = Arc::new(Recorder::default());
-        let (r, _) = build_registry_with(
+        let m = build_modes_with(
             &Config::default(),
             Default::default(),
             Some(suggestions(&recorder)),
         );
-        r.mode(0).query("rust", 8);
-        r.mode(1).query("lofi", 8);
+        for &chip in &m.chips {
+            m.registry.mode(chip).query("rust", 8);
+        }
         assert_eq!(
             *recorder.0.lock().unwrap(),
-            [Engine::Google, Engine::YouTube]
+            [Engine::Google, Engine::YouTube, Engine::Wikipedia]
         );
     }
 
@@ -251,8 +380,8 @@ mod tests {
             suggestions: false,
             ..Config::default()
         };
-        let (r, _) = build_registry_with(&config, Default::default(), Some(suggestions(&recorder)));
-        r.mode(0).query("rust", 8);
+        let m = build_modes_with(&config, Default::default(), Some(suggestions(&recorder)));
+        m.registry.mode(m.default).query("rust", 8);
         assert!(recorder.0.lock().unwrap().is_empty());
     }
 
@@ -396,19 +525,145 @@ background = \"wallpaper\"
     }
 
     #[test]
-    fn unknown_default_mode_falls_back_to_first() {
+    fn default_mode_off_the_bar_falls_back_to_the_first_engine() {
         let c = Config {
             default_mode: "bing".into(),
             ..Config::default()
         };
-        assert_eq!(build_registry(&c, Default::default()).1, 0);
+        let m = build_modes(&c, Default::default());
+        assert_eq!(m.default, m.chips[0]);
+        assert_eq!(m.registry.mode(m.default).id(), "google");
+    }
+
+    fn chip_ids(m: &Modes) -> Vec<&str> {
+        m.chips.iter().map(|&i| m.registry.mode(i).id()).collect()
     }
 
     #[test]
-    fn registry_has_google_youtube_files_in_order() {
-        let (r, default) = build_registry(&Config::default(), Default::default());
-        let ids: Vec<_> = (0..r.len()).map(|i| r.mode(i).id()).collect();
-        assert_eq!(ids, ["google", "youtube", "files"]);
-        assert_eq!(default, 0);
+    fn every_engine_is_registered_and_the_default_five_are_on_the_bar() {
+        let m = build_modes(&Config::default(), Default::default());
+        assert_eq!(m.registry.len(), catalog::CATALOG.len());
+        assert_eq!(
+            chip_ids(&m),
+            ["google", "youtube", "files", "wikipedia", "chatgpt"]
+        );
+        assert_eq!(m.registry.mode(m.default).id(), "google");
+    }
+
+    fn crates() -> CustomEngine {
+        CustomEngine {
+            name: "Crates".into(),
+            url: "https://crates.io/search?q={query}".into(),
+            shortcut: "cr".into(),
+        }
+    }
+
+    #[test]
+    fn shortcuts_reach_catalog_and_custom_engines() {
+        let mut c = Config::default();
+        c.add_custom(crates());
+        let m = build_modes(&c, Default::default());
+        let target = |s: &str| {
+            let i = m.shortcuts.iter().find(|(k, _)| k == s).unwrap().1;
+            m.registry.mode(i).id().to_owned()
+        };
+        assert_eq!(target("gh"), "github");
+        assert_eq!(target("fi"), "files");
+        assert_eq!(target("cr"), "custom:cr");
+        assert_eq!(chip_ids(&m).last(), Some(&"custom:cr"));
+    }
+
+    #[test]
+    fn the_bar_list_is_cleaned() {
+        let c = Config {
+            engines: [
+                "github", "nope", "github", "bing", "x", "maps", "mdn", "reddit", "ebay",
+            ]
+            .map(String::from)
+            .to_vec(),
+            ..Config::default()
+        };
+        assert_eq!(c.chips(), ["github", "bing", "x", "maps", "mdn", "reddit"]);
+        let empty = Config {
+            engines: vec!["nope".into()],
+            ..Config::default()
+        };
+        assert_eq!(empty.chips(), DEFAULT_ENGINES);
+    }
+
+    #[test]
+    fn a_settings_file_from_before_engines_gets_the_default_five() {
+        let c: Config = toml::from_str("hotkey = \"Alt+Space\"\n").unwrap();
+        assert_eq!(c.chips(), DEFAULT_ENGINES);
+    }
+
+    #[test]
+    fn adding_respects_the_limits() {
+        let mut c = Config::default();
+        assert_eq!(c.add_engine("google"), Err(EngineChange::AlreadyThere));
+        assert_eq!(c.add_engine("nope"), Err(EngineChange::Unknown));
+        assert_eq!(c.add_engine("github"), Ok(()));
+        assert_eq!(c.chips().last().map(String::as_str), Some("github"));
+        assert_eq!(c.add_engine("bing"), Err(EngineChange::Full));
+    }
+
+    #[test]
+    fn removing_keeps_at_least_one() {
+        let mut c = Config {
+            engines: vec!["google".into(), "files".into()],
+            ..Config::default()
+        };
+        assert_eq!(c.remove_engine("google"), Ok(()));
+        assert_eq!(c.chips(), ["files"]);
+        assert_eq!(c.remove_engine("files"), Err(EngineChange::LastOne));
+        assert_eq!(c.remove_engine("bing"), Err(EngineChange::Unknown));
+    }
+
+    #[test]
+    fn moving_reorders_the_bar() {
+        let mut c = Config::default();
+        c.move_engine(0, 2);
+        assert_eq!(
+            c.chips(),
+            ["youtube", "files", "google", "wikipedia", "chatgpt"]
+        );
+        c.move_engine(4, 0);
+        assert_eq!(
+            c.chips(),
+            ["chatgpt", "youtube", "files", "google", "wikipedia"]
+        );
+        c.move_engine(1, 99);
+        assert_eq!(
+            c.chips(),
+            ["chatgpt", "files", "google", "wikipedia", "youtube"]
+        );
+    }
+
+    #[test]
+    fn custom_engines_join_the_bar_when_there_is_room_and_leave_with_delete() {
+        let mut c = Config::default();
+        c.add_custom(crates());
+        assert_eq!(c.chips().len(), 6);
+        let mut second = crates();
+        second.shortcut = "cr2".into();
+        c.add_custom(second);
+        assert_eq!(c.custom_engines.len(), 2);
+        assert!(!c.chips().contains(&"custom:cr2".to_owned()));
+        c.remove_custom("custom:cr");
+        assert_eq!(c.custom_engines.len(), 1);
+        assert_eq!(c.chips(), DEFAULT_ENGINES);
+    }
+
+    #[test]
+    fn engines_and_custom_engines_survive_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut c = Config::default();
+        c.add_custom(crates());
+        c.move_engine(5, 0);
+        save(&path, &c).unwrap();
+        let (back, err) = load_or_create(&path);
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(back, c);
     }
 }

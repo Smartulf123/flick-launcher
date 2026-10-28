@@ -63,6 +63,8 @@ pub struct Services {
     pub tray_queue: TrayQueue,
     /// Starts a file index rebuild.
     pub reindex: Box<dyn Fn()>,
+    /// A fresh launcher for these settings (after the bar's engines change).
+    pub build_launcher: Box<dyn Fn(&Config) -> Launcher>,
     /// Background workers for the gallery (search, thumbnails, downloads).
     pub loader: Loader,
 }
@@ -617,9 +619,9 @@ impl FlickApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let active = self.launcher.active_mode();
-                for (i, name) in self.launcher.modes().into_iter().enumerate() {
-                    if mode_chip(ui, p, name, i == active).clicked() {
+                let active = self.launcher.active_chip();
+                for (i, name) in self.launcher.chips().into_iter().enumerate() {
+                    if mode_chip(ui, p, name, Some(i) == active).clicked() {
                         clicked_mode = Some(i);
                     }
                 }
@@ -696,7 +698,7 @@ impl FlickApp {
             self.launcher.select(i);
         }
         if let Some(i) = clicked_mode {
-            self.launcher.select_mode(i);
+            self.launcher.select_chip(i);
         }
         if let Some(i) = clicked_row {
             self.launcher.select(i);
