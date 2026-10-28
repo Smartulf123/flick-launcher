@@ -59,6 +59,21 @@ impl Config {
         catalog::find(id).is_some() || self.custom_engines.iter().any(|c| c.id() == id)
     }
 
+    /// The search address (with `{query}`) of a website engine, built-in
+    /// or custom; `None` for Files, Apps and unknown ids.
+    pub fn engine_url(&self, id: &str) -> Option<String> {
+        if let Some(spec) = catalog::find(id) {
+            return match spec.target {
+                Target::Web { url, .. } => Some(url.to_owned()),
+                Target::Files | Target::Apps => None,
+            };
+        }
+        self.custom_engines
+            .iter()
+            .find(|c| c.id() == id)
+            .map(|c| c.url.clone())
+    }
+
     /// The bar's engines: unknown ids and repeats dropped, at most five;
     /// the default list if nothing is left.
     pub fn chips(&self) -> Vec<String> {
@@ -570,6 +585,23 @@ background = \"wallpaper\"
         let m = build_modes(&c, Default::default(), Default::default());
         assert_eq!(m.registry.len(), catalog::CATALOG.len() + 1);
         assert_eq!(chip_ids(&m).last(), Some(&"custom:crates"));
+    }
+
+    #[test]
+    fn engines_know_their_search_address() {
+        let mut c = Config::default();
+        c.add_custom(crates());
+        assert_eq!(
+            c.engine_url("github").as_deref(),
+            Some("https://github.com/search?q={query}")
+        );
+        assert_eq!(
+            c.engine_url("custom:crates").as_deref(),
+            Some("https://crates.io/search?q={query}")
+        );
+        assert_eq!(c.engine_url("files"), None);
+        assert_eq!(c.engine_url("apps"), None);
+        assert_eq!(c.engine_url("nope"), None);
     }
 
     #[test]

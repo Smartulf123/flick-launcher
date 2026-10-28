@@ -7,6 +7,7 @@ use flick_core::catalog::{self, CATALOG, CustomEngine, GROUPS};
 use flick_core::config::{Config, MAX_ENGINES};
 use flick_core::launcher::Intent;
 
+use crate::favicons::{Favicons, Mark};
 use crate::theme::Palette;
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -90,16 +91,6 @@ pub fn selectable(rows: &[Row], full: bool) -> Vec<usize> {
         })
         .map(|(i, _)| i)
         .collect()
-}
-
-/// Where chip `from` lands when it is let go at `x`, given every chip's
-/// horizontal centre: after each other chip whose centre is left of `x`.
-pub fn drop_index(centers: &[f32], from: usize, x: f32) -> usize {
-    centers
-        .iter()
-        .enumerate()
-        .filter(|&(i, &c)| i != from && c < x)
-        .count()
 }
 
 /// What the picker wants done to the settings.
@@ -216,6 +207,7 @@ impl Picker {
         ui: &mut egui::Ui,
         p: &Palette,
         config: &Config,
+        logos: &mut Favicons,
         height: f32,
     ) -> Option<PickerAction> {
         if self.form.is_some() {
@@ -278,15 +270,16 @@ impl Picker {
                                     .color(p.muted),
                             );
                         }
-                        Row::Engine { .. } => {
-                            if let Some(a) = engine_row(ui, p, row, selected, reveal, full) {
+                        Row::Engine { id, name, .. } => {
+                            let mark = Mark::for_engine(logos, ui.ctx(), config, id, name);
+                            if let Some(a) = engine_row(ui, p, row, &mark, selected, reveal, full) {
                                 action = Some(a);
                             }
                         }
                         Row::AddOwn => {
                             ui.add_space(6.0);
                             let response =
-                                text_row(ui, p, "+ Add your own\u{2026}", p.accent, selected);
+                                text_row(ui, p, None, "+ Add your own\u{2026}", p.accent, selected);
                             if reveal {
                                 response.scroll_to_me(None);
                             }
@@ -372,10 +365,11 @@ fn field(
     response
 }
 
-/// A full-width clickable row of text.
+/// A full-width clickable row of text, after a small mark if given.
 fn text_row(
     ui: &mut egui::Ui,
     p: &Palette,
+    mark: Option<&Mark>,
     text: &str,
     color: egui::Color32,
     selected: bool,
@@ -385,8 +379,15 @@ fn text_row(
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, 4, p.selected);
     }
+    let mut left = rect.left() + 8.0;
+    if let Some(mark) = mark {
+        let icon =
+            egui::Rect::from_min_size(egui::pos2(left, rect.center().y - 8.0), vec2(16.0, 16.0));
+        mark.paint(ui.painter(), icon, color);
+        left = icon.right() + 8.0;
+    }
     ui.painter().text(
-        rect.left_center() + vec2(8.0, 0.0),
+        egui::pos2(left, rect.center().y),
         Align2::LEFT_CENTER,
         text,
         FontId::proportional(13.0),
@@ -401,6 +402,7 @@ fn engine_row(
     ui: &mut egui::Ui,
     p: &Palette,
     row: &Row,
+    mark: &Mark,
     selected: bool,
     reveal: bool,
     full: bool,
@@ -421,7 +423,7 @@ fn engine_row(
         name.clone()
     };
     let color = if addable { p.text } else { p.muted };
-    let response = text_row(ui, p, &left, color, selected);
+    let response = text_row(ui, p, Some(mark), &left, color, selected);
     if reveal {
         response.scroll_to_me(None);
     }
@@ -610,19 +612,21 @@ mod tests {
         let mut used = 0.0;
         let mut output = ctx.run_ui(raw, |ui| {
             let top = ui.cursor().top();
-            Picker::default().draw(ui, &crate::theme::KANAGAWA, &Config::default(), 400.0);
+            let mut logos = Favicons::with_fetch(
+                std::env::temp_dir().join("flick-test-logos"),
+                |_| anyhow::bail!("offline"),
+                || {},
+            );
+            Picker::default().draw(
+                ui,
+                &crate::theme::KANAGAWA,
+                &Config::default(),
+                &mut logos,
+                400.0,
+            );
             used = ui.min_rect().bottom() - top;
         });
         output.textures_delta.clear();
         assert!(used >= 399.0, "{used}");
-    }
-
-    #[test]
-    fn a_dragged_chip_lands_after_the_chips_left_of_the_pointer() {
-        let centers = [10.0, 50.0, 90.0, 130.0];
-        assert_eq!(drop_index(&centers, 0, 100.0), 2);
-        assert_eq!(drop_index(&centers, 3, 0.0), 0);
-        assert_eq!(drop_index(&centers, 1, 60.0), 1);
-        assert_eq!(drop_index(&centers, 0, 999.0), 3);
     }
 }

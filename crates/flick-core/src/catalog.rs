@@ -130,6 +130,17 @@ pub fn find(id: &str) -> Option<&'static EngineSpec> {
     CATALOG.iter().find(|e| e.id == id)
 }
 
+/// The site whose logo stands for an engine or result with this address:
+/// its host, except Google Maps, which lives under Google's own host.
+pub fn icon_domain(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_lowercase();
+    if host == "www.google.com" && parsed.path().starts_with("/maps") {
+        return Some("maps.google.com".into());
+    }
+    Some(host)
+}
+
 /// `template` with every `{query}` replaced by `text`, percent-encoded so
 /// it is safe in a query string and in a path alike.
 pub fn fill(template: &str, text: &str) -> String {
@@ -263,6 +274,28 @@ mod tests {
         assert_eq!(find("files").unwrap().target, Target::Files);
         assert_eq!(find("apps").unwrap().target, Target::Apps);
         assert!(find("nope").is_none());
+    }
+
+    #[test]
+    fn logos_come_from_the_site_and_maps_has_its_own() {
+        assert_eq!(
+            icon_domain("https://www.google.com/search?q={query}").as_deref(),
+            Some("www.google.com")
+        );
+        assert_eq!(
+            icon_domain("https://www.google.com/maps/search/{query}").as_deref(),
+            Some("maps.google.com")
+        );
+        assert_eq!(
+            icon_domain("https://claude.ai/new?q=rust%20egui").as_deref(),
+            Some("claude.ai")
+        );
+        assert_eq!(
+            icon_domain("https://WWW.Amazon.com/s?k=x").as_deref(),
+            Some("www.amazon.com")
+        );
+        assert_eq!(icon_domain("not an address"), None);
+        assert_eq!(icon_domain("file:///C:/x.txt"), None);
     }
 
     #[test]

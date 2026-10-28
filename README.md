@@ -68,7 +68,7 @@ You can also click an engine chip or a result with the mouse. The gear at the to
 
 ### Search engines
 
-Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar. Hover a chip and click its **×** to take it off, or drag it to a new place. The bar holds one to five engines; to swap one in when it is full, take one off first. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`).
+Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar. Hover a chip and click its **×** to take it off, or pick it up and drag it to a new place; the other chips slide aside to show where it will land. The bar holds one to five engines; to swap one in when it is full, take one off first. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`).
 
 | Group | Engines |
 |---|---|
@@ -122,6 +122,7 @@ Choosing a background or changing the engines on the bar saves it into this file
 
 Flick has no account, no telemetry and no tracking. It only goes online for these:
 
+- **Engine logos**: the first time Flick shows an engine's or a web result's logo, it asks Google's favicon service for it by the site's name (such as `claude.ai`), never by what you type, and keeps it on disk so it is asked only once.
 - **Search suggestions**: what you type in Google or YouTube is sent to Google's suggestion service, in Wikipedia to Wikipedia's and in DuckDuckGo to DuckDuckGo's, as a browser's search box does. Other engines get nothing until you press Enter. Set `suggestions = false` to turn this off.
 - **The online gallery**: searches and pictures come from wallhaven.cc, only while the gallery's online tab is open.
 

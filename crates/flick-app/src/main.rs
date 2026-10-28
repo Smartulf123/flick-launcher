@@ -4,7 +4,9 @@ mod actions;
 mod background;
 mod bar_menu;
 mod builtin_backgrounds;
+mod chip_layout;
 mod engine_picker;
+mod favicons;
 mod gallery;
 mod gallery_loader;
 mod hotkey;
@@ -277,6 +279,10 @@ fn main() -> eframe::Result {
                 }),
                 build_launcher: Box::new(build_launcher),
                 loader: gallery_loader::Loader::start({
+                    let ctx = ctx.clone();
+                    move || ctx.request_repaint()
+                }),
+                logos: favicons::Favicons::start(platform::paths::cache_dir().join("favicons"), {
                     let ctx = ctx.clone();
                     move || ctx.request_repaint()
                 }),
