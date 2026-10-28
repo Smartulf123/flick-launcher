@@ -18,4 +18,9 @@ impl IconCache {
     ) -> Option<&(TextureHandle, String)> {
         None
     }
+
+    /// Always `None`: apps use Flick's own App icon.
+    pub fn get_app(&mut self, _ctx: &egui::Context, _launch: &str) -> Option<&TextureHandle> {
+        None
+    }
 }

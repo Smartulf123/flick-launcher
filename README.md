@@ -7,9 +7,10 @@ Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere an
 - **Google**: Enter opens a Google search in your default browser, with suggestions as you type.
 - **YouTube**: the same, for YouTube search results.
 - **Files**: fuzzy search over your own Desktop, Documents and Downloads folders as you type (`bdgt` finds `budget_2026.xlsx`). On Windows, files and folders show their real Windows icons.
-- **Wikipedia** and **ChatGPT**.
+- **Apps**: find a program you have installed and start it (`spot` starts Spotify). On Windows this is everything in Start's app list, Store apps included, with their own icons; on a Mac the apps in Applications; on Linux the apps in your app menu.
+- **Wikipedia**.
 
-Swap them for any of 23 engines (DuckDuckGo, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own.
+Swap them for any of 24 engines (DuckDuckGo, ChatGPT, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own.
 
 It runs quietly in the tray (the menu bar on a Mac), starts when you log in, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
@@ -71,7 +72,7 @@ Click **+** at the end of the engine chips to see every engine, grouped; type to
 
 | Group | Engines |
 |---|---|
-| On this PC | Files |
+| On this PC | Files, Apps |
 | Web search | Google, DuckDuckGo, Bing, Brave |
 | AI | ChatGPT, Claude, Perplexity |
 | Video & music | YouTube, Spotify, Twitch |
@@ -105,7 +106,7 @@ Flick creates `config.toml` the first time it runs: in `%APPDATA%\flick` on Wind
 |---|---|---|
 | `hotkey` | `"Alt+Space"` (Linux: `"Ctrl+Alt+Space"`) | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt` (Option on a Mac), `Ctrl`, `Shift`, `Super` (the Windows key, or Cmd on a Mac), e.g. `"Ctrl+Space"`. |
 | `default_mode` | `"google"` | Engine the bar opens in, by its id (`google`, `files`, `github`, ...). If it is not on the bar, the first engine is used. |
-| `engines` | `["google", "youtube", "files", "wikipedia", "chatgpt"]` | The engines on the bar, in order. Easiest to change with **+** on the bar. |
+| `engines` | `["google", "youtube", "files", "apps", "wikipedia"]` | The engines on the bar, in order. Easiest to change with **+** on the bar. |
 | `custom_engines` | none | Engines you added: `name` and `url` (with `{query}`). |
 | `max_results` | `8` | Most results shown at once. |
 | `suggestions` | `true` | Suggestions while you type, for Google, YouTube, Wikipedia and DuckDuckGo. |

@@ -30,6 +30,7 @@ use eframe::egui;
 use flick_core::config::{self, BackgroundSource};
 
 use crate::platform::message::Message;
+use flick_core::apps::SharedApps;
 use flick_core::index::{self, SharedIndex};
 use flick_core::launcher::Launcher;
 use flick_core::modes::suggest::{SuggestionCache, Suggestions};
@@ -38,6 +39,7 @@ use flick_core::modes::suggest::{SuggestionCache, Suggestions};
 #[derive(Clone)]
 struct Reindexer {
     shared: SharedIndex,
+    apps: SharedApps,
     roots: Vec<PathBuf>,
     excludes: Vec<String>,
     updated: Arc<AtomicBool>,
@@ -45,7 +47,10 @@ struct Reindexer {
 }
 
 impl Reindexer {
+    /// Rebuilds the file index and, alongside it, the app list. The handle
+    /// is the file index's.
     fn run(&self) -> std::thread::JoinHandle<()> {
+        self.scan_apps();
         let (shared, updated, ctx) = (self.shared.clone(), self.updated.clone(), self.ctx.clone());
         let started = Instant::now();
         index::spawn_rebuild(
@@ -62,6 +67,19 @@ impl Reindexer {
                 ctx.request_repaint();
             },
         )
+    }
+
+    /// Lists the installed apps on its own thread, then swaps the list in.
+    fn scan_apps(&self) {
+        let (apps, updated, ctx) = (self.apps.clone(), self.updated.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let list = platform::apps::scan();
+            log::info!("found {} apps in {:.1?}", list.len(), started.elapsed());
+            *apps.write().unwrap_or_else(|e| e.into_inner()) = Some(list);
+            updated.store(true, Ordering::Relaxed);
+            ctx.request_repaint();
+        });
     }
 
     /// Rebuilds every `minutes` minutes, forever, on its own thread.
@@ -147,14 +165,15 @@ fn main() -> eframe::Result {
     };
 
     let shared = SharedIndex::default();
+    let apps = SharedApps::default();
     // Also used to rebuild the bar after its engines change.
     let build_launcher = {
-        let shared = shared.clone();
+        let (shared, apps) = (shared.clone(), apps.clone());
         move |config: &config::Config| {
             let modes = config::build_modes_with(
                 config,
                 shared.clone(),
-                Default::default(),
+                apps.clone(),
                 Some(suggestions.clone()),
             );
             Launcher::new(modes, config.max_results)
@@ -209,6 +228,7 @@ fn main() -> eframe::Result {
 
             let reindexer = Reindexer {
                 shared,
+                apps,
                 roots,
                 excludes: config.files.exclude_dir_names.clone(),
                 updated: results_changed.clone(),

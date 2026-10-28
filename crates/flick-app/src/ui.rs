@@ -1045,6 +1045,15 @@ fn row_icon(
                 _ => "Web".into(),
             }
         }
+        (ResultKind::App, Action::Launch(launch)) => {
+            match icons.get_app(ui.ctx(), launch) {
+                Some(texture) => {
+                    ui.add(egui::Image::new((texture.id(), vec2(ICON_SIZE, ICON_SIZE))));
+                }
+                None => icon_slot(ui, Icon::App, ICON_SIZE, fallback),
+            }
+            "App".into()
+        }
         _ => {
             icon_slot(ui, Icon::for_kind(item.kind), ICON_SIZE, fallback);
             String::new()
