@@ -115,9 +115,21 @@ mod tests {
     }
 
     #[test]
-    fn start_lists_calculator_as_a_store_app_with_an_icon() {
+    fn start_lists_apps_and_their_icons() {
         let apps = scan();
         assert!(apps.len() > 5, "{} apps", apps.len());
+        assert!(
+            apps.iter()
+                .all(|a| !a.name.is_empty() && !a.launch.is_empty())
+        );
+        let image = apps.iter().find_map(|a| icon(&a.launch)).expect("an icon");
+        assert_eq!(image.size, [32, 32]);
+    }
+
+    #[test]
+    #[ignore = "needs a Windows desktop with Store apps (CI runs Windows Server)"]
+    fn start_lists_calculator_as_a_store_app_with_an_icon() {
+        let apps = scan();
         let calculator = apps
             .iter()
             .find(|a| a.name == "Calculator")
