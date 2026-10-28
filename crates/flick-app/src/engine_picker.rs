@@ -100,7 +100,18 @@ pub enum PickerAction {
     Add(String),
     AddCustom(CustomEngine),
     DeleteCustom(String),
+    /// An engine was picked up to be carried onto the bar.
+    Lift {
+        id: String,
+        name: String,
+    },
     Close,
+}
+
+/// Rows that can be picked up and carried onto the bar: engines that are
+/// not on it yet (also when it is full, to swap one in).
+pub fn liftable(row: &Row) -> bool {
+    matches!(row, Row::Engine { on_bar: false, .. })
 }
 
 /// The "+" list while it is open.
@@ -224,12 +235,17 @@ impl Picker {
         ui.horizontal(|ui| {
             let (text, color) = if full {
                 (
-                    format!("{MAX_ENGINES} of {MAX_ENGINES}: remove an engine first (hover a chip, then \u{d7})"),
+                    format!(
+                        "{MAX_ENGINES} of {MAX_ENGINES}: drag an engine onto a chip to swap it in"
+                    ),
                     p.warning,
                 )
             } else {
                 (
-                    format!("Add an engine \u{b7} {} of {MAX_ENGINES}", config.chips().len()),
+                    format!(
+                        "Add an engine \u{b7} {} of {MAX_ENGINES}",
+                        config.chips().len()
+                    ),
                     p.muted,
                 )
             };
@@ -278,8 +294,15 @@ impl Picker {
                         }
                         Row::AddOwn => {
                             ui.add_space(6.0);
-                            let response =
-                                text_row(ui, p, None, "+ Add your own\u{2026}", p.accent, selected);
+                            let response = text_row(
+                                ui,
+                                p,
+                                None,
+                                "+ Add your own\u{2026}",
+                                p.accent,
+                                selected,
+                                Sense::click(),
+                            );
                             if reveal {
                                 response.scroll_to_me(None);
                             }
@@ -373,9 +396,9 @@ fn text_row(
     text: &str,
     color: egui::Color32,
     selected: bool,
+    sense: Sense,
 ) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), sense);
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, 4, p.selected);
     }
@@ -396,6 +419,15 @@ fn text_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// The text drawn for a row.
+fn row_label(row: &Row) -> String {
+    match row {
+        Row::Heading(label) => label.to_uppercase(),
+        Row::Engine { name, .. } => name.clone(),
+        Row::AddOwn => "+ Add your own\u{2026}".into(),
+    }
+}
+
 /// An engine in the list. Returns Add when clicked (if it can be added) and
 /// DeleteCustom when a custom engine's delete mark is clicked.
 fn engine_row(
@@ -408,24 +440,37 @@ fn engine_row(
     full: bool,
 ) -> Option<PickerAction> {
     let Row::Engine {
-        id,
-        name,
-        on_bar,
-        custom,
+        id, on_bar, custom, ..
     } = row
     else {
         return None;
     };
     let addable = !on_bar && !full;
-    let left = if *on_bar {
-        format!("\u{2713} {name}")
-    } else {
-        name.clone()
-    };
     let color = if addable { p.text } else { p.muted };
-    let response = text_row(ui, p, Some(mark), &left, color, selected);
+    let sense = if liftable(row) {
+        Sense::click_and_drag()
+    } else {
+        Sense::click()
+    };
+    let response = text_row(ui, p, Some(mark), &row_label(row), color, selected, sense);
+    if response.drag_started() {
+        return Some(PickerAction::Lift {
+            id: id.clone(),
+            name: row_label(row),
+        });
+    }
     if reveal {
         response.scroll_to_me(None);
+    }
+    // On the bar already: a check on the right, left of any delete mark.
+    if *on_bar {
+        let room = if *custom { 40.0 } else { 16.0 };
+        let c = response.rect.right_center() - vec2(room, 0.0);
+        let stroke = egui::Stroke::new(1.8, p.accent);
+        ui.painter()
+            .line_segment([c + vec2(-5.0, 0.0), c + vec2(-1.5, 3.5)], stroke);
+        ui.painter()
+            .line_segment([c + vec2(-1.5, 3.5), c + vec2(5.0, -4.0)], stroke);
     }
     let delete = custom.then(|| {
         let r = response.rect;
@@ -506,6 +551,39 @@ mod tests {
             list[list.len() - 3..],
             ["# Your own", "Crates \u{2713}", "+"]
         );
+    }
+
+    #[test]
+    fn every_row_label_is_in_the_bar_font() {
+        // A character the font lacks is drawn as an empty box.
+        let mut c = Config::default();
+        c.remove_engine("wikipedia").unwrap();
+        c.add_custom(crates());
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.ctx().fonts_mut(|fonts| {
+                for row in rows(&c, "") {
+                    let label = row_label(&row);
+                    let font = FontId::proportional(13.0);
+                    assert!(fonts.has_glyphs(&font, &label), "{label:?}");
+                }
+            });
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn engines_off_the_bar_can_be_picked_up_even_when_it_is_full() {
+        let c = Config::default();
+        let list = rows(&c, "");
+        let lift = |name: &str| {
+            let row = list.iter().find(|r| row_label(r) == name).unwrap();
+            liftable(row)
+        };
+        assert!(lift("Reddit"));
+        assert!(!lift("Google"));
+        assert!(!liftable(&Row::AddOwn));
+        assert!(!liftable(&Row::Heading("AI")));
     }
 
     #[test]

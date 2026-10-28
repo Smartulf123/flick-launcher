@@ -76,6 +76,45 @@ pub fn ease(pos: Pos2, target: Pos2, dt: f32) -> Pos2 {
     }
 }
 
+/// What letting go of an engine carried from the "+" list does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drop {
+    /// Takes the place of the chip at this position.
+    Replace(usize),
+    /// Goes in at this position (the bar has room).
+    Insert(usize),
+}
+
+/// The drop for `pointer`, given the bar's chips at rest and the `row` they
+/// sit in. On a chip it swaps that chip, except near its edges while the bar
+/// has `room`, where it goes in beside it; between chips it goes in (with
+/// room) or swaps the nearest chip in that row (without); off the row, nothing.
+pub fn drop_for(chips: &[Rect], row: Rect, pointer: Pos2, room: bool) -> Option<Drop> {
+    if !row.expand(GAP).contains(pointer) {
+        return None;
+    }
+    if let Some(i) = chips.iter().position(|r| r.contains(pointer)) {
+        let (r, edge) = (chips[i], chips[i].width() * 0.2);
+        return Some(if room && pointer.x < r.left() + edge {
+            Drop::Insert(i)
+        } else if room && pointer.x > r.right() - edge {
+            Drop::Insert(i + 1)
+        } else {
+            Drop::Replace(i)
+        });
+    }
+    if room {
+        return Some(Drop::Insert(drop_index(chips, pointer)));
+    }
+    let across = |r: &Rect| (r.left() - pointer.x).max(pointer.x - r.right()).max(0.0);
+    chips
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| (r.center().y - pointer.y).abs() <= (HEIGHT + GAP) / 2.0)
+        .min_by(|(_, a), (_, b)| across(a).total_cmp(&across(b)))
+        .map(|(i, _)| Drop::Replace(i))
+}
+
 /// The rectangle of an item placed at `at` with `width`.
 pub fn rect(at: Pos2, width: f32) -> Rect {
     Rect::from_min_size(at, vec2(width, HEIGHT))
@@ -134,6 +173,55 @@ mod tests {
                 pos2(168.0, 0.0)
             ]
         );
+    }
+
+    fn bar(widths: &[f32]) -> Vec<Rect> {
+        place(widths, 500.0)
+            .into_iter()
+            .zip(widths)
+            .map(|(at, &w)| rect(at, w))
+            .collect()
+    }
+
+    #[test]
+    fn a_carried_engine_swaps_the_chip_it_is_let_go_on() {
+        // Chips at x 0-100, 106-206, 212-312.
+        let chips = bar(&[100.0, 100.0, 100.0]);
+        let row = Rect::from_min_size(pos2(0.0, 0.0), vec2(500.0, HEIGHT));
+        let at = |x: f32| pos2(x, 13.0);
+        assert_eq!(
+            drop_for(&chips, row, at(50.0), false),
+            Some(Drop::Replace(0))
+        );
+        assert_eq!(
+            drop_for(&chips, row, at(160.0), true),
+            Some(Drop::Replace(1))
+        );
+        // Near a chip's edge, with room: in beside it.
+        assert_eq!(
+            drop_for(&chips, row, at(110.0), true),
+            Some(Drop::Insert(1))
+        );
+        assert_eq!(
+            drop_for(&chips, row, at(305.0), true),
+            Some(Drop::Insert(3))
+        );
+        // Between or after chips: in, with room; else the nearest chip.
+        assert_eq!(
+            drop_for(&chips, row, at(400.0), true),
+            Some(Drop::Insert(3))
+        );
+        assert_eq!(
+            drop_for(&chips, row, at(400.0), false),
+            Some(Drop::Replace(2))
+        );
+        assert_eq!(
+            drop_for(&chips, row, at(103.0), false),
+            Some(Drop::Replace(0))
+        );
+        // Off the row: nothing.
+        assert_eq!(drop_for(&chips, row, pos2(50.0, 200.0), false), None);
+        assert_eq!(drop_for(&[], row, at(50.0), true), Some(Drop::Insert(0)));
     }
 
     #[test]

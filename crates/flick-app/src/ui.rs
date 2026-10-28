@@ -10,7 +10,7 @@ use eframe::egui::{
     self, Align, Color32, Key, Layout, Modifiers, RichText, TextEdit, TextureHandle,
     TextureOptions, ViewportCommand, vec2,
 };
-use flick_core::config::{self, BackgroundSource, Config, MIN_ENGINES};
+use flick_core::config::{self, BackgroundSource, Config, MAX_ENGINES, MIN_ENGINES};
 use flick_core::launcher::{Effect, Intent, Launcher};
 use flick_core::mode::{Action, ResultItem, ResultKind};
 
@@ -120,6 +120,8 @@ pub struct FlickApp {
     picker: Option<Picker>,
     /// The chip being carried to a new place.
     dragging: Option<Drag>,
+    /// An engine carried from the "+" list toward the bar.
+    carrying: Option<Carry>,
     /// Where each chip (by engine id) was drawn last frame, relative to the
     /// row, so chips glide to new places instead of jumping.
     chip_pos: HashMap<String, egui::Pos2>,
@@ -132,6 +134,13 @@ struct Drag {
     from: usize,
     /// Where on the chip it was grabbed.
     grab: egui::Vec2,
+}
+
+/// An engine picked up in the "+" list.
+#[derive(Debug, Clone)]
+struct Carry {
+    id: String,
+    name: String,
 }
 
 /// The "+" chip is square.
@@ -178,6 +187,7 @@ impl FlickApp {
             menu_choice: None,
             picker: None,
             dragging: None,
+            carrying: None,
             chip_pos: HashMap::new(),
         }
     }
@@ -205,6 +215,7 @@ impl FlickApp {
         self.menu_open = false;
         self.picker = None;
         self.dragging = None;
+        self.carrying = None;
         self.visible = false;
         self.services.window.hide();
     }
@@ -286,6 +297,7 @@ impl FlickApp {
                 self.change_engines(|c| c.add_custom(engine));
             }
             PickerAction::DeleteCustom(id) => self.change_engines(|c| c.remove_custom(&id)),
+            PickerAction::Lift { id, name } => self.carrying = Some(Carry { id, name }),
             PickerAction::Close => self.picker = None,
         }
     }
@@ -866,7 +878,39 @@ impl FlickApp {
             let centre = corner + vec2(widths[drag.from], chip_layout::HEIGHT) / 2.0;
             (drag.from, chip_layout::drop_index(&slots, centre))
         });
-        let places = chip_layout::places_while_dragging(&widths, PLUS_SIZE, landing, max_width);
+        let at_rest = chip_layout::places_while_dragging(&widths, PLUS_SIZE, None, max_width);
+        let rest: Vec<egui::Rect> = (0..names.len())
+            .map(|i| chip_layout::rect(at_rest[i], widths[i]))
+            .collect();
+        let row_area = egui::Rect::from_min_max(
+            egui::Pos2::ZERO,
+            egui::pos2(max_width, at_rest[names.len()].y + chip_layout::HEIGHT),
+        );
+        let carried = self.carrying.clone().zip(pointer).map(|(carry, at)| {
+            let at = at - origin.to_vec2();
+            let room = names.len() < MAX_ENGINES;
+            (carry, at, chip_layout::drop_for(&rest, row_area, at, room))
+        });
+        let places = match &carried {
+            // A gap opens where the carried engine will go in.
+            Some((carry, _, Some(chip_layout::Drop::Insert(at)))) => {
+                let mut with = widths.clone();
+                with.push(chip_width(ui, &carry.name));
+                let mut places = chip_layout::places_while_dragging(
+                    &with,
+                    PLUS_SIZE,
+                    Some((names.len(), *at)),
+                    max_width,
+                );
+                places.remove(names.len());
+                places
+            }
+            _ => chip_layout::places_while_dragging(&widths, PLUS_SIZE, landing, max_width),
+        };
+        let swapping = match &carried {
+            Some((_, _, Some(chip_layout::Drop::Replace(i)))) => Some(*i),
+            _ => None,
+        };
         let bottom = places
             .iter()
             .map(|at| at.y + chip_layout::HEIGHT)
@@ -877,7 +921,7 @@ impl FlickApp {
         );
 
         let dt = ui.input(|i| i.stable_dt).min(0.1);
-        let mut moving = held.is_some();
+        let mut moving = held.is_some() || carried.is_some();
         let mut change = None;
         let mut released = None;
         for (i, name) in names.iter().enumerate() {
@@ -910,6 +954,15 @@ impl FlickApp {
                 paint_chip(&ctx.layer_painter(layer), p, rect, name, &mark, true, true);
             } else {
                 paint_chip(ui.painter(), p, rect, name, &mark, Some(i) == active, false);
+            }
+            // The chip a carried engine would take the place of.
+            if swapping == Some(i) {
+                ui.painter().rect_stroke(
+                    rect.expand(2.0),
+                    10,
+                    egui::Stroke::new(2.0, p.accent),
+                    egui::StrokeKind::Outside,
+                );
             }
 
             let badge = remove_badge(rect);
@@ -958,6 +1011,44 @@ impl FlickApp {
         {
             change = Some(ChipChange::Move(from, to));
         }
+        // An engine carried from the list follows the pointer, and goes in
+        // (or swaps) where it is let go.
+        if let Some((carry, at, drop)) = carried {
+            let width = chip_width(ui, &carry.name);
+            let rect = chip_layout::rect(
+                origin + at.to_vec2() - vec2(width, chip_layout::HEIGHT) / 2.0,
+                width,
+            );
+            let mark = Mark::for_engine(
+                &mut self.services.logos,
+                &ctx,
+                &self.settings.config,
+                &carry.id,
+                &carry.name,
+            );
+            let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("carried"));
+            paint_chip(
+                &ctx.layer_painter(layer),
+                p,
+                rect,
+                &carry.name,
+                &mark,
+                true,
+                true,
+            );
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            if ctx.input(|i| i.pointer.any_released()) {
+                self.carrying = None;
+                change = match drop {
+                    Some(chip_layout::Drop::Replace(i)) => Some(ChipChange::Replace(i, carry.id)),
+                    Some(chip_layout::Drop::Insert(i)) => Some(ChipChange::Insert(i, carry.id)),
+                    None => change,
+                };
+            }
+        } else if self.carrying.is_some() && ctx.input(|i| !i.pointer.any_down()) {
+            // Let go somewhere the pointer could not be followed.
+            self.carrying = None;
+        }
         if moving {
             ctx.request_repaint();
         }
@@ -974,18 +1065,28 @@ impl FlickApp {
     }
 
     fn apply_chip_change(&mut self, change: ChipChange) {
-        let Some(id) = self.chip_id(match change {
-            ChipChange::Remove(i) | ChipChange::Move(i, _) => i,
-        }) else {
-            return;
-        };
         match change {
-            ChipChange::Remove(_) => self.change_engines(|c| {
-                if let Err(e) = c.remove_engine(&id) {
-                    log::warn!("could not remove {id}: {e:?}");
+            ChipChange::Remove(i) => {
+                let Some(id) = self.chip_id(i) else {
+                    return;
+                };
+                self.change_engines(|c| {
+                    if let Err(e) = c.remove_engine(&id) {
+                        log::warn!("could not remove {id}: {e:?}");
+                    }
+                });
+            }
+            ChipChange::Move(from, to) => self.change_engines(|c| c.move_engine(from, to)),
+            ChipChange::Replace(at, id) => self.change_engines(|c| {
+                if let Err(e) = c.replace_engine(at, &id) {
+                    log::warn!("could not swap in {id}: {e:?}");
                 }
             }),
-            ChipChange::Move(from, to) => self.change_engines(|c| c.move_engine(from, to)),
+            ChipChange::Insert(at, id) => self.change_engines(|c| {
+                if let Err(e) = c.insert_engine(at, &id) {
+                    log::warn!("could not add {id}: {e:?}");
+                }
+            }),
         }
     }
 
@@ -1017,10 +1118,14 @@ impl FlickApp {
 }
 
 /// A change made on the chip row, by position on the bar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ChipChange {
     Remove(usize),
     Move(usize, usize),
+    /// An engine from the list takes the place of the chip at this position.
+    Replace(usize, String),
+    /// An engine from the list goes in at this position.
+    Insert(usize, String),
 }
 
 /// Allocates a square of `size` and draws `icon` in it.
