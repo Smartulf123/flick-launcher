@@ -115,7 +115,6 @@ pub const CATALOG: &[EngineSpec] = &[
     web("maps", "Maps", Knowledge, "https://www.google.com/maps/search/{query}", None),
     web("translate", "Translate", Knowledge, "https://translate.google.com/?sl=auto&op=translate&text={query}", None),
     web("github", "GitHub", Code, "https://github.com/search?q={query}", None),
-    web("stackoverflow", "Stack Overflow", Code, "https://stackoverflow.com/search?q={query}", None),
     web("mdn", "MDN", Code, "https://developer.mozilla.org/search?q={query}", None),
     web("docsrs", "docs.rs", Code, "https://docs.rs/releases/search?query={query}", None),
     web("amazon", "Amazon", Shopping, "https://www.amazon.com/s?k={query}", None),
@@ -265,7 +264,8 @@ mod tests {
 
     #[test]
     fn catalog_has_the_agreed_engines_in_group_order() {
-        assert_eq!(CATALOG.len(), 24);
+        assert_eq!(CATALOG.len(), 23);
+        assert!(find("stackoverflow").is_none());
         let groups: Vec<_> = CATALOG.iter().map(|e| e.group).collect();
         let mut sorted = groups.clone();
         sorted.sort_by_key(|g| GROUPS.iter().position(|x| x == g));

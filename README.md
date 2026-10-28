@@ -10,7 +10,7 @@ Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere an
 - **Apps**: find a program you have installed and start it (`spot` starts Spotify). On Windows this is everything in Start's app list, Store apps included, with their own icons; on a Mac the apps in Applications; on Linux the apps in your app menu.
 - **Wikipedia**.
 
-Swap them for any of 24 engines (DuckDuckGo, ChatGPT, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own.
+Swap them for any of 23 engines (DuckDuckGo, ChatGPT, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own.
 
 It runs quietly in the tray (the menu bar on a Mac), starts when you log in, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
@@ -77,7 +77,7 @@ Click **+** at the end of the engine chips to see every engine, grouped; type to
 | AI | ChatGPT, Claude, Perplexity |
 | Video & music | YouTube, Spotify, Twitch |
 | Knowledge | Wikipedia, Maps, Translate |
-| Code | GitHub, Stack Overflow, MDN, docs.rs |
+| Code | GitHub, MDN, docs.rs |
 | Shopping | Amazon, eBay |
 | Social | Reddit, X, LinkedIn |
 

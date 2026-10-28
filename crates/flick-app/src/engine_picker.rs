@@ -396,6 +396,15 @@ fn text_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// The text drawn for a row.
+fn row_label(row: &Row) -> String {
+    match row {
+        Row::Heading(label) => label.to_uppercase(),
+        Row::Engine { name, .. } => name.clone(),
+        Row::AddOwn => "+ Add your own\u{2026}".into(),
+    }
+}
+
 /// An engine in the list. Returns Add when clicked (if it can be added) and
 /// DeleteCustom when a custom engine's delete mark is clicked.
 fn engine_row(
@@ -408,24 +417,26 @@ fn engine_row(
     full: bool,
 ) -> Option<PickerAction> {
     let Row::Engine {
-        id,
-        name,
-        on_bar,
-        custom,
+        id, on_bar, custom, ..
     } = row
     else {
         return None;
     };
     let addable = !on_bar && !full;
-    let left = if *on_bar {
-        format!("\u{2713} {name}")
-    } else {
-        name.clone()
-    };
     let color = if addable { p.text } else { p.muted };
-    let response = text_row(ui, p, Some(mark), &left, color, selected);
+    let response = text_row(ui, p, Some(mark), &row_label(row), color, selected);
     if reveal {
         response.scroll_to_me(None);
+    }
+    // On the bar already: a check on the right, left of any delete mark.
+    if *on_bar {
+        let room = if *custom { 40.0 } else { 16.0 };
+        let c = response.rect.right_center() - vec2(room, 0.0);
+        let stroke = egui::Stroke::new(1.8, p.accent);
+        ui.painter()
+            .line_segment([c + vec2(-5.0, 0.0), c + vec2(-1.5, 3.5)], stroke);
+        ui.painter()
+            .line_segment([c + vec2(-1.5, 3.5), c + vec2(5.0, -4.0)], stroke);
     }
     let delete = custom.then(|| {
         let r = response.rect;
@@ -506,6 +517,25 @@ mod tests {
             list[list.len() - 3..],
             ["# Your own", "Crates \u{2713}", "+"]
         );
+    }
+
+    #[test]
+    fn every_row_label_is_in_the_bar_font() {
+        // A character the font lacks is drawn as an empty box.
+        let mut c = Config::default();
+        c.remove_engine("wikipedia").unwrap();
+        c.add_custom(crates());
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.ctx().fonts_mut(|fonts| {
+                for row in rows(&c, "") {
+                    let label = row_label(&row);
+                    let font = FontId::proportional(13.0);
+                    assert!(fonts.has_glyphs(&font, &label), "{label:?}");
+                }
+            });
+        });
+        output.textures_delta.clear();
     }
 
     #[test]
