@@ -171,9 +171,8 @@ mod tests {
         let mode = WebSearchMode::custom(&crate::catalog::CustomEngine {
             name: "Crates".into(),
             url: "https://crates.io/search?q={query}".into(),
-            shortcut: "cr".into(),
         });
-        assert_eq!((mode.id(), mode.name()), ("custom:cr", "Crates"));
+        assert_eq!((mode.id(), mode.name()), ("custom:crates", "Crates"));
         let r = mode.query("serde json", 8);
         assert_eq!(r[0].title, "Search Crates for \"serde json\"");
         assert_eq!(

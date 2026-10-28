@@ -24,7 +24,7 @@ pub struct Config {
     /// DuckDuckGo). Sends what you type to that engine, as a browser
     /// search box does.
     pub suggestions: bool,
-    /// The engines on the bar, by id, in Tab order (1 to 6). Use `chips()`
+    /// The engines on the bar, by id, in Tab order (1 to 5). Use `chips()`
     /// for the cleaned list.
     pub engines: Vec<String>,
     pub files: FilesConfig,
@@ -33,9 +33,9 @@ pub struct Config {
     pub custom_engines: Vec<CustomEngine>,
 }
 
-/// The bar holds at least one engine and at most six.
+/// The bar holds at least one engine and at most five.
 pub const MIN_ENGINES: usize = 1;
-pub const MAX_ENGINES: usize = 6;
+pub const MAX_ENGINES: usize = 5;
 
 /// The engines a new settings file starts with.
 pub const DEFAULT_ENGINES: [&str; 5] = ["google", "youtube", "files", "wikipedia", "chatgpt"];
@@ -43,7 +43,7 @@ pub const DEFAULT_ENGINES: [&str; 5] = ["google", "youtube", "files", "wikipedia
 /// Why an engine could not be added to or removed from the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineChange {
-    /// Already six engines.
+    /// Already five engines.
     Full,
     /// It is the only engine left.
     LastOne,
@@ -58,7 +58,7 @@ impl Config {
         catalog::find(id).is_some() || self.custom_engines.iter().any(|c| c.id() == id)
     }
 
-    /// The bar's engines: unknown ids and repeats dropped, at most six;
+    /// The bar's engines: unknown ids and repeats dropped, at most five;
     /// the default list if nothing is left.
     pub fn chips(&self) -> Vec<String> {
         let mut chips: Vec<String> = Vec::new();
@@ -90,7 +90,7 @@ impl Config {
         Ok(())
     }
 
-    /// Takes engine `id` off the bar (it stays reachable by shortcut).
+    /// Takes engine `id` off the bar (it stays in the "+" list).
     pub fn remove_engine(&mut self, id: &str) -> Result<(), EngineChange> {
         let mut chips = self.chips();
         let Some(at) = chips.iter().position(|c| c == id) else {
@@ -271,7 +271,7 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
 }
 
 /// Registers every engine (the catalog, then custom engines) and works
-/// out the bar's engines, the shortcuts and the engine the bar opens in.
+/// out the bar's engines and the engine the bar opens in.
 pub fn build_modes(config: &Config, index: SharedIndex) -> Modes {
     build_modes_with(config, index, None)
 }
@@ -285,9 +285,7 @@ pub fn build_modes_with(
 ) -> Modes {
     let suggestions = suggestions.filter(|_| config.suggestions);
     let mut registry = ModeRegistry::new();
-    let mut shortcuts = Vec::new();
     for spec in catalog::CATALOG {
-        shortcuts.push((spec.shortcut.to_owned(), registry.len()));
         match (spec.target, WebSearchMode::from_spec(spec)) {
             (Target::Files, _) => registry.register(Box::new(FilesMode::new(index.clone()))),
             (_, Some(mode)) => registry.register(Box::new(match &suggestions {
@@ -298,7 +296,6 @@ pub fn build_modes_with(
         }
     }
     for custom in &config.custom_engines {
-        shortcuts.push((custom.shortcut.clone(), registry.len()));
         registry.register(Box::new(WebSearchMode::custom(custom)));
     }
     let chips: Vec<usize> = config
@@ -313,7 +310,6 @@ pub fn build_modes_with(
     Modes {
         registry,
         chips,
-        shortcuts,
         default,
     }
 }
@@ -554,23 +550,17 @@ background = \"wallpaper\"
         CustomEngine {
             name: "Crates".into(),
             url: "https://crates.io/search?q={query}".into(),
-            shortcut: "cr".into(),
         }
     }
 
     #[test]
-    fn shortcuts_reach_catalog_and_custom_engines() {
+    fn custom_engines_are_registered_after_the_catalog() {
         let mut c = Config::default();
+        c.remove_engine("chatgpt").unwrap();
         c.add_custom(crates());
         let m = build_modes(&c, Default::default());
-        let target = |s: &str| {
-            let i = m.shortcuts.iter().find(|(k, _)| k == s).unwrap().1;
-            m.registry.mode(i).id().to_owned()
-        };
-        assert_eq!(target("gh"), "github");
-        assert_eq!(target("fi"), "files");
-        assert_eq!(target("cr"), "custom:cr");
-        assert_eq!(chip_ids(&m).last(), Some(&"custom:cr"));
+        assert_eq!(m.registry.len(), catalog::CATALOG.len() + 1);
+        assert_eq!(chip_ids(&m).last(), Some(&"custom:crates"));
     }
 
     #[test]
@@ -583,7 +573,7 @@ background = \"wallpaper\"
             .to_vec(),
             ..Config::default()
         };
-        assert_eq!(c.chips(), ["github", "bing", "x", "maps", "mdn", "reddit"]);
+        assert_eq!(c.chips(), ["github", "bing", "x", "maps", "mdn"]);
         let empty = Config {
             engines: vec!["nope".into()],
             ..Config::default()
@@ -602,6 +592,9 @@ background = \"wallpaper\"
         let mut c = Config::default();
         assert_eq!(c.add_engine("google"), Err(EngineChange::AlreadyThere));
         assert_eq!(c.add_engine("nope"), Err(EngineChange::Unknown));
+        // The default five fill the bar.
+        assert_eq!(c.add_engine("github"), Err(EngineChange::Full));
+        c.remove_engine("chatgpt").unwrap();
         assert_eq!(c.add_engine("github"), Ok(()));
         assert_eq!(c.chips().last().map(String::as_str), Some("github"));
         assert_eq!(c.add_engine("bing"), Err(EngineChange::Full));
@@ -642,16 +635,17 @@ background = \"wallpaper\"
     #[test]
     fn custom_engines_join_the_bar_when_there_is_room_and_leave_with_delete() {
         let mut c = Config::default();
+        c.remove_engine("chatgpt").unwrap();
         c.add_custom(crates());
-        assert_eq!(c.chips().len(), 6);
+        assert_eq!(c.chips().len(), 5);
         let mut second = crates();
-        second.shortcut = "cr2".into();
+        second.name = "Crates 2".into();
         c.add_custom(second);
         assert_eq!(c.custom_engines.len(), 2);
-        assert!(!c.chips().contains(&"custom:cr2".to_owned()));
-        c.remove_custom("custom:cr");
+        assert!(!c.chips().contains(&"custom:crates-2".to_owned()));
+        c.remove_custom("custom:crates");
         assert_eq!(c.custom_engines.len(), 1);
-        assert_eq!(c.chips(), DEFAULT_ENGINES);
+        assert_eq!(c.chips(), DEFAULT_ENGINES[..4]);
     }
 
     #[test]
@@ -660,7 +654,7 @@ background = \"wallpaper\"
         let path = dir.path().join("config.toml");
         let mut c = Config::default();
         c.add_custom(crates());
-        c.move_engine(5, 0);
+        c.move_engine(4, 0);
         save(&path, &c).unwrap();
         let (back, err) = load_or_create(&path);
         assert!(err.is_none(), "{err:?}");

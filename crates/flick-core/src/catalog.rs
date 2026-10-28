@@ -10,7 +10,7 @@ use crate::modes::suggest::Engine;
 /// Where the search text goes in an engine's address.
 pub const QUERY: &str = "{query}";
 
-/// A custom engine's id is this followed by its shortcut.
+/// A custom engine's id is this followed by its name in lowercase.
 pub const CUSTOM_PREFIX: &str = "custom:";
 
 /// The headings the engine list is grouped under.
@@ -74,8 +74,6 @@ pub struct EngineSpec {
     /// Shown on the chip and in the list.
     pub name: &'static str,
     pub group: Group,
-    /// Typed before a space to switch to this engine, e.g. `"gh"`.
-    pub shortcut: &'static str,
     pub target: Target,
 }
 
@@ -83,7 +81,6 @@ const fn web(
     id: &'static str,
     name: &'static str,
     group: Group,
-    shortcut: &'static str,
     url: &'static str,
     suggest: Option<Engine>,
 ) -> EngineSpec {
@@ -91,40 +88,38 @@ const fn web(
         id,
         name,
         group,
-        shortcut,
         target: Target::Web { url, suggest },
     }
 }
 
 use Group::*;
 
-/// Every built-in engine, grouped in list order. Shortcuts are 2-3 letters
-/// and never a common word, so ordinary searches do not switch engines.
+/// Every built-in engine, grouped in list order.
 #[rustfmt::skip]
 pub const CATALOG: &[EngineSpec] = &[
-    EngineSpec { id: "files", name: "Files", group: OnThisPc, shortcut: "fi", target: Target::Files },
-    web("google", "Google", WebSearch, "gg", "https://www.google.com/search?q={query}", Some(Engine::Google)),
-    web("duckduckgo", "DuckDuckGo", WebSearch, "ddg", "https://duckduckgo.com/?q={query}", Some(Engine::DuckDuckGo)),
-    web("bing", "Bing", WebSearch, "bi", "https://www.bing.com/search?q={query}", None),
-    web("brave", "Brave", WebSearch, "brv", "https://search.brave.com/search?q={query}", None),
-    web("chatgpt", "ChatGPT", Ai, "gpt", "https://chatgpt.com/?q={query}", None),
-    web("claude", "Claude", Ai, "cl", "https://claude.ai/new?q={query}", None),
-    web("perplexity", "Perplexity", Ai, "pp", "https://www.perplexity.ai/search?q={query}", None),
-    web("youtube", "YouTube", VideoMusic, "yt", "https://www.youtube.com/results?search_query={query}", Some(Engine::YouTube)),
-    web("spotify", "Spotify", VideoMusic, "sp", "https://open.spotify.com/search/{query}", None),
-    web("twitch", "Twitch", VideoMusic, "tw", "https://www.twitch.tv/search?term={query}", None),
-    web("wikipedia", "Wikipedia", Knowledge, "wp", "https://en.wikipedia.org/w/index.php?search={query}", Some(Engine::Wikipedia)),
-    web("maps", "Maps", Knowledge, "mp", "https://www.google.com/maps/search/{query}", None),
-    web("translate", "Translate", Knowledge, "tr", "https://translate.google.com/?sl=auto&op=translate&text={query}", None),
-    web("github", "GitHub", Code, "gh", "https://github.com/search?q={query}", None),
-    web("stackoverflow", "Stack Overflow", Code, "st", "https://stackoverflow.com/search?q={query}", None),
-    web("mdn", "MDN", Code, "mdn", "https://developer.mozilla.org/search?q={query}", None),
-    web("docsrs", "docs.rs", Code, "rs", "https://docs.rs/releases/search?query={query}", None),
-    web("amazon", "Amazon", Shopping, "amz", "https://www.amazon.com/s?k={query}", None),
-    web("ebay", "eBay", Shopping, "eb", "https://www.ebay.com/sch/i.html?_nkw={query}", None),
-    web("reddit", "Reddit", Social, "rd", "https://www.reddit.com/search/?q={query}", None),
-    web("x", "X", Social, "xx", "https://x.com/search?q={query}", None),
-    web("linkedin", "LinkedIn", Social, "li", "https://www.linkedin.com/search/results/all/?keywords={query}", None),
+    EngineSpec { id: "files", name: "Files", group: OnThisPc, target: Target::Files },
+    web("google", "Google", WebSearch, "https://www.google.com/search?q={query}", Some(Engine::Google)),
+    web("duckduckgo", "DuckDuckGo", WebSearch, "https://duckduckgo.com/?q={query}", Some(Engine::DuckDuckGo)),
+    web("bing", "Bing", WebSearch, "https://www.bing.com/search?q={query}", None),
+    web("brave", "Brave", WebSearch, "https://search.brave.com/search?q={query}", None),
+    web("chatgpt", "ChatGPT", Ai, "https://chatgpt.com/?q={query}", None),
+    web("claude", "Claude", Ai, "https://claude.ai/new?q={query}", None),
+    web("perplexity", "Perplexity", Ai, "https://www.perplexity.ai/search?q={query}", None),
+    web("youtube", "YouTube", VideoMusic, "https://www.youtube.com/results?search_query={query}", Some(Engine::YouTube)),
+    web("spotify", "Spotify", VideoMusic, "https://open.spotify.com/search/{query}", None),
+    web("twitch", "Twitch", VideoMusic, "https://www.twitch.tv/search?term={query}", None),
+    web("wikipedia", "Wikipedia", Knowledge, "https://en.wikipedia.org/w/index.php?search={query}", Some(Engine::Wikipedia)),
+    web("maps", "Maps", Knowledge, "https://www.google.com/maps/search/{query}", None),
+    web("translate", "Translate", Knowledge, "https://translate.google.com/?sl=auto&op=translate&text={query}", None),
+    web("github", "GitHub", Code, "https://github.com/search?q={query}", None),
+    web("stackoverflow", "Stack Overflow", Code, "https://stackoverflow.com/search?q={query}", None),
+    web("mdn", "MDN", Code, "https://developer.mozilla.org/search?q={query}", None),
+    web("docsrs", "docs.rs", Code, "https://docs.rs/releases/search?query={query}", None),
+    web("amazon", "Amazon", Shopping, "https://www.amazon.com/s?k={query}", None),
+    web("ebay", "eBay", Shopping, "https://www.ebay.com/sch/i.html?_nkw={query}", None),
+    web("reddit", "Reddit", Social, "https://www.reddit.com/search/?q={query}", None),
+    web("x", "X", Social, "https://x.com/search?q={query}", None),
+    web("linkedin", "LinkedIn", Social, "https://www.linkedin.com/search/results/all/?keywords={query}", None),
 ];
 
 /// The built-in engine with this id.
@@ -151,17 +146,26 @@ fn encode(text: &str) -> String {
     out
 }
 
-/// An engine someone added: a name, an address with `{query}`, a shortcut.
+/// An engine someone added: a name and an address with `{query}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomEngine {
     pub name: String,
     pub url: String,
-    pub shortcut: String,
 }
 
 impl CustomEngine {
+    /// `custom:` and the name in lowercase, with a dash for each run of
+    /// anything but letters and digits ("Thingi Verse!" is `custom:thingi-verse`).
     pub fn id(&self) -> String {
-        format!("{CUSTOM_PREFIX}{}", self.shortcut)
+        let mut slug = String::new();
+        for c in self.name.trim().chars().flat_map(char::to_lowercase) {
+            if c.is_alphanumeric() {
+                slug.push(c);
+            } else if !slug.is_empty() && !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        format!("{CUSTOM_PREFIX}{}", slug.trim_end_matches('-'))
     }
 }
 
@@ -173,9 +177,8 @@ pub enum CustomError {
     NotHttps,
     NoQuery,
     BadAddress,
-    ShortcutShape,
-    /// The name of the engine that already has the shortcut.
-    ShortcutTaken(String),
+    /// One of the person's own engines already has this name.
+    NameTaken(String),
 }
 
 impl fmt::Display for CustomError {
@@ -186,22 +189,20 @@ impl fmt::Display for CustomError {
             CustomError::NotHttps => write!(f, "The address must start with https://"),
             CustomError::NoQuery => write!(f, "Put {QUERY} where the search text goes"),
             CustomError::BadAddress => write!(f, "That is not a web address"),
-            CustomError::ShortcutShape => write!(f, "Shortcut: 2-5 letters or digits, no spaces"),
-            CustomError::ShortcutTaken(name) => write!(f, "{name} already uses that shortcut"),
+            CustomError::NameTaken(name) => write!(f, "You already have an engine called {name}"),
         }
     }
 }
 
-/// Checks a new custom engine against the rules and the shortcuts in use,
-/// returning it trimmed, with a lowercase shortcut.
+/// Checks a new custom engine against the rules and the person's other
+/// engines, returning it trimmed.
 pub fn check_custom(
     name: &str,
     url: &str,
-    shortcut: &str,
     existing: &[CustomEngine],
 ) -> Result<CustomEngine, CustomError> {
-    let (name, url, shortcut) = (name.trim(), url.trim(), shortcut.trim().to_lowercase());
-    if name.is_empty() {
+    let (name, url) = (name.trim(), url.trim());
+    if !name.chars().any(char::is_alphanumeric) {
         return Err(CustomError::NameEmpty);
     }
     if name.chars().count() > 20 {
@@ -217,31 +218,14 @@ pub fn check_custom(
         Ok(parsed) if parsed.host_str().is_some_and(|h| h.contains('.')) => {}
         _ => return Err(CustomError::BadAddress),
     }
-    let shape = (2..=5).contains(&shortcut.len())
-        && shortcut
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-    if !shape {
-        return Err(CustomError::ShortcutShape);
-    }
-    let taken = CATALOG
-        .iter()
-        .find(|e| e.shortcut == shortcut)
-        .map(|e| e.name.to_owned())
-        .or_else(|| {
-            existing
-                .iter()
-                .find(|c| c.shortcut == shortcut)
-                .map(|c| c.name.clone())
-        });
-    if let Some(owner) = taken {
-        return Err(CustomError::ShortcutTaken(owner));
-    }
-    Ok(CustomEngine {
+    let engine = CustomEngine {
         name: name.to_owned(),
         url: url.to_owned(),
-        shortcut,
-    })
+    };
+    if let Some(same) = existing.iter().find(|c| c.id() == engine.id()) {
+        return Err(CustomError::NameTaken(same.name.clone()));
+    }
+    Ok(engine)
 }
 
 #[cfg(test)]
@@ -250,11 +234,9 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn ids_and_shortcuts_are_unique() {
+    fn ids_are_unique() {
         let ids: HashSet<_> = CATALOG.iter().map(|e| e.id).collect();
-        let shortcuts: HashSet<_> = CATALOG.iter().map(|e| e.shortcut).collect();
         assert_eq!(ids.len(), CATALOG.len());
-        assert_eq!(shortcuts.len(), CATALOG.len());
     }
 
     #[test]
@@ -268,24 +250,13 @@ mod tests {
     }
 
     #[test]
-    fn shortcuts_are_short_and_not_common_words() {
-        for engine in CATALOG {
-            let n = engine.shortcut.len();
-            assert!((2..=3).contains(&n), "{}", engine.shortcut);
-            assert!(
-                !["so", "am", "be", "go", "is", "it", "on", "to", "an"].contains(&engine.shortcut)
-            );
-        }
-    }
-
-    #[test]
     fn catalog_has_the_agreed_engines_in_group_order() {
         assert_eq!(CATALOG.len(), 23);
         let groups: Vec<_> = CATALOG.iter().map(|e| e.group).collect();
         let mut sorted = groups.clone();
         sorted.sort_by_key(|g| GROUPS.iter().position(|x| x == g));
         assert_eq!(groups, sorted);
-        assert_eq!(find("github").unwrap().shortcut, "gh");
+        assert_eq!(find("github").unwrap().name, "GitHub");
         assert_eq!(find("files").unwrap().target, Target::Files);
         assert!(find("nope").is_none());
     }
@@ -314,75 +285,66 @@ mod tests {
         vec![CustomEngine {
             name: "Thingiverse".into(),
             url: "https://www.thingiverse.com/search?q={query}".into(),
-            shortcut: "tv".into(),
         }]
     }
 
     #[test]
     fn a_good_custom_engine_is_cleaned_up() {
-        let c = check_custom(
-            " Crates ",
-            " https://crates.io/search?q={query} ",
-            "CR",
-            &mine(),
-        )
-        .unwrap();
+        let c = check_custom(" Crates ", " https://crates.io/search?q={query} ", &mine()).unwrap();
         assert_eq!(c.name, "Crates");
         assert_eq!(c.url, "https://crates.io/search?q={query}");
-        assert_eq!(c.shortcut, "cr");
-        assert_eq!(c.id(), "custom:cr");
+        assert_eq!(c.id(), "custom:crates");
+    }
+
+    #[test]
+    fn custom_ids_come_from_the_name() {
+        let id = |name: &str| {
+            CustomEngine {
+                name: name.into(),
+                url: String::new(),
+            }
+            .id()
+        };
+        assert_eq!(id("Thingi Verse!"), "custom:thingi-verse");
+        assert_eq!(id("  Blå  bær "), "custom:blå-bær");
+        assert_eq!(id("A.B"), "custom:a-b");
     }
 
     #[test]
     fn custom_engine_mistakes_are_named() {
         let ok_url = "https://a.com/?q={query}";
+        assert_eq!(check_custom("", ok_url, &[]), Err(CustomError::NameEmpty));
         assert_eq!(
-            check_custom("", ok_url, "ab", &[]),
+            check_custom(" !? ", ok_url, &[]),
             Err(CustomError::NameEmpty)
         );
         assert_eq!(
-            check_custom(&"x".repeat(21), ok_url, "ab", &[]),
+            check_custom(&"x".repeat(21), ok_url, &[]),
             Err(CustomError::NameTooLong)
         );
         assert_eq!(
-            check_custom("A", "http://a.com/?q={query}", "ab", &[]),
+            check_custom("A", "http://a.com/?q={query}", &[]),
             Err(CustomError::NotHttps)
         );
         assert_eq!(
-            check_custom("A", "https://a.com/?q=", "ab", &[]),
+            check_custom("A", "https://a.com/?q=", &[]),
             Err(CustomError::NoQuery)
         );
         assert_eq!(
-            check_custom("A", "https://{query}", "ab", &[]),
+            check_custom("A", "https://{query}", &[]),
             Err(CustomError::BadAddress)
         );
         assert_eq!(
-            check_custom("A", ok_url, "a", &[]),
-            Err(CustomError::ShortcutShape)
-        );
-        assert_eq!(
-            check_custom("A", ok_url, "a b", &[]),
-            Err(CustomError::ShortcutShape)
-        );
-        assert_eq!(
-            check_custom("A", ok_url, "abcdef", &[]),
-            Err(CustomError::ShortcutShape)
-        );
-        assert_eq!(
-            check_custom("A", ok_url, "gh", &[]),
-            Err(CustomError::ShortcutTaken("GitHub".into()))
-        );
-        assert_eq!(
-            check_custom("A", ok_url, "tv", &mine()),
-            Err(CustomError::ShortcutTaken("Thingiverse".into()))
+            check_custom("thingiverse", ok_url, &mine()),
+            Err(CustomError::NameTaken("Thingiverse".into()))
         );
     }
 
     #[test]
     fn mistakes_read_as_plain_words() {
         assert_eq!(
-            CustomError::ShortcutTaken("GitHub".into()).to_string(),
-            "GitHub already uses that shortcut"
+            CustomError::NameTaken("Crates".into()).to_string(),
+            "You already have an engine called Crates"
         );
         assert_eq!(
             CustomError::NoQuery.to_string(),

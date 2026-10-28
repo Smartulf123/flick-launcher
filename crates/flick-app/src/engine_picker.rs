@@ -1,6 +1,7 @@
 //! The "+" list on the chip row: every engine, grouped or filtered by what
 //! is typed, to put on the bar; and the small form for adding your own.
 
+use eframe::egui::style::ScrollStyle;
 use eframe::egui::{self, Align2, FontId, RichText, ScrollArea, Sense, TextEdit, vec2};
 use flick_core::catalog::{self, CATALOG, CustomEngine, GROUPS};
 use flick_core::config::{Config, MAX_ENGINES};
@@ -8,8 +9,6 @@ use flick_core::launcher::Intent;
 
 use crate::theme::Palette;
 
-/// The list scrolls beyond this height, so the bar never runs off screen.
-const LIST_HEIGHT: f32 = 340.0;
 const ROW_HEIGHT: f32 = 24.0;
 
 /// One line of the list.
@@ -19,7 +18,6 @@ pub enum Row {
     Engine {
         id: String,
         name: String,
-        shortcut: String,
         /// Already one of the bar's chips.
         on_bar: bool,
         /// Added by the person, so it can be deleted.
@@ -29,18 +27,15 @@ pub enum Row {
 }
 
 /// The list for `filter`: with no filter, every group under its heading,
-/// then the person's own engines; with a filter, the engines whose name or
-/// shortcut contains it. "Add your own" always comes last.
+/// then the person's own engines; with a filter, the engines whose name
+/// contains it. "Add your own" always comes last.
 pub fn rows(config: &Config, filter: &str) -> Vec<Row> {
     let chips = config.chips();
     let filter = filter.trim().to_lowercase();
-    let matches = |name: &str, shortcut: &str| {
-        filter.is_empty() || name.to_lowercase().contains(&filter) || shortcut.contains(&filter)
-    };
-    let engine = |id: &str, name: &str, shortcut: &str, custom: bool| Row::Engine {
+    let matches = |name: &str| filter.is_empty() || name.to_lowercase().contains(&filter);
+    let engine = |id: &str, name: &str, custom: bool| Row::Engine {
         id: id.to_owned(),
         name: name.to_owned(),
-        shortcut: shortcut.to_owned(),
         on_bar: chips.iter().any(|c| c == id),
         custom,
     };
@@ -53,7 +48,7 @@ pub fn rows(config: &Config, filter: &str) -> Vec<Row> {
                 CATALOG
                     .iter()
                     .filter(|e| e.group == group)
-                    .map(|e| engine(e.id, e.name, e.shortcut, false)),
+                    .map(|e| engine(e.id, e.name, false)),
             );
         }
         if !config.custom_engines.is_empty() {
@@ -63,16 +58,16 @@ pub fn rows(config: &Config, filter: &str) -> Vec<Row> {
         out.extend(
             CATALOG
                 .iter()
-                .filter(|e| matches(e.name, e.shortcut))
-                .map(|e| engine(e.id, e.name, e.shortcut, false)),
+                .filter(|e| matches(e.name))
+                .map(|e| engine(e.id, e.name, false)),
         );
     }
     out.extend(
         config
             .custom_engines
             .iter()
-            .filter(|c| matches(&c.name, &c.shortcut))
-            .map(|c| engine(&c.id(), &c.name, &c.shortcut, true)),
+            .filter(|c| matches(&c.name))
+            .map(|c| engine(&c.id(), &c.name, true)),
     );
     out.push(Row::AddOwn);
     out
@@ -126,6 +121,9 @@ pub struct Picker {
     pub selected: usize,
     /// The "Add your own" form, while it is open.
     pub form: Option<Form>,
+    /// The selection moved by key; scroll it into view once. (Doing it
+    /// every frame would undo every turn of the mouse wheel.)
+    reveal: bool,
 }
 
 /// The fields of the "Add your own" form.
@@ -133,7 +131,6 @@ pub struct Picker {
 pub struct Form {
     pub name: String,
     pub url: String,
-    pub shortcut: String,
     /// Why the last Add was refused, in plain words.
     pub error: Option<String>,
     /// Put the cursor in the name field on the next frame.
@@ -144,6 +141,7 @@ impl Picker {
     pub fn set_filter(&mut self, text: &str) {
         self.filter = text.to_owned();
         self.selected = 0;
+        self.reveal = true;
     }
 
     /// A key from the search bar while the picker is open.
@@ -159,16 +157,20 @@ impl Picker {
         let rows = rows(config, &self.filter);
         let picks = selectable(&rows, is_full(config));
         match intent {
-            Intent::Up => self.selected = self.selected.saturating_sub(1),
+            Intent::Up => {
+                self.selected = self.selected.saturating_sub(1);
+                self.reveal = true;
+            }
             Intent::Down => {
                 self.selected = (self.selected + 1).min(picks.len().saturating_sub(1));
+                self.reveal = true;
             }
             Intent::Enter => {
                 let row = picks.get(self.selected).map(|&i| rows[i].clone())?;
                 return self.choose(&row);
             }
             Intent::Escape => return Some(PickerAction::Close),
-            Intent::Tab | Intent::ShiftTab | Intent::BackspaceOnEmpty => {}
+            Intent::Tab | Intent::ShiftTab => {}
         }
         None
     }
@@ -190,12 +192,7 @@ impl Picker {
     /// Checks the form; a good engine closes it, a refused one shows why.
     fn submit(&mut self, config: &Config) -> Option<PickerAction> {
         let form = self.form.as_mut()?;
-        match catalog::check_custom(
-            &form.name,
-            &form.url,
-            &form.shortcut,
-            &config.custom_engines,
-        ) {
+        match catalog::check_custom(&form.name, &form.url, &config.custom_engines) {
             Ok(engine) => {
                 self.form = None;
                 Some(PickerAction::AddCustom(engine))
@@ -212,12 +209,14 @@ impl Picker {
         self.form.is_some()
     }
 
-    /// Draws the list or the form in the results card.
+    /// Draws the list or the form in the results card, the list as tall
+    /// as `height` (the card's height with a full page of results).
     pub fn draw(
         &mut self,
         ui: &mut egui::Ui,
         p: &Palette,
         config: &Config,
+        height: f32,
     ) -> Option<PickerAction> {
         if self.form.is_some() {
             return self.draw_form(ui, p, config);
@@ -227,6 +226,8 @@ impl Picker {
         let picks = selectable(&rows, full);
         self.selected = self.selected.min(picks.len().saturating_sub(1));
         let selected_row = picks.get(self.selected).copied();
+        let reveal = std::mem::take(&mut self.reveal);
+        let top = ui.cursor().top();
 
         ui.horizontal(|ui| {
             let (text, color) = if full {
@@ -247,14 +248,27 @@ impl Picker {
         });
         ui.add_space(4.0);
 
+        let list_height = (height - (ui.cursor().top() - top)).max(ROW_HEIGHT * 4.0);
+        // A bar that is always there and wide enough to grab.
+        ui.spacing_mut().scroll = ScrollStyle {
+            bar_width: 10.0,
+            handle_min_length: 32.0,
+            dormant_handle_opacity: 0.6,
+            dormant_background_opacity: 0.25,
+            ..ScrollStyle::solid()
+        };
         let mut action = None;
         let mut open_form = false;
         ScrollArea::vertical()
-            .max_height(LIST_HEIGHT)
+            .max_height(list_height)
+            // Without this the list fits the window as it is now, and the
+            // window (which grows to fit what is drawn) never grows.
+            .min_scrolled_height(list_height)
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
                     let selected = Some(i) == selected_row;
+                    let reveal = selected && reveal;
                     match row {
                         Row::Heading(label) => {
                             ui.add_space(6.0);
@@ -265,15 +279,15 @@ impl Picker {
                             );
                         }
                         Row::Engine { .. } => {
-                            if let Some(a) = engine_row(ui, p, row, selected, full) {
+                            if let Some(a) = engine_row(ui, p, row, selected, reveal, full) {
                                 action = Some(a);
                             }
                         }
                         Row::AddOwn => {
                             ui.add_space(6.0);
                             let response =
-                                text_row(ui, p, "+ Add your own\u{2026}", "", p.accent, selected);
-                            if selected {
+                                text_row(ui, p, "+ Add your own\u{2026}", p.accent, selected);
+                            if reveal {
                                 response.scroll_to_me(None);
                             }
                             if response.clicked() {
@@ -314,7 +328,6 @@ impl Picker {
             &mut form.url,
             "https://www.example.com/search?q={query}",
         );
-        field(ui, p, "Shortcut (2-5 letters)", &mut form.shortcut, "tv");
         if let Some(error) = &form.error {
             ui.label(RichText::new(error).size(12.0).color(p.warning));
         }
@@ -359,12 +372,11 @@ fn field(
     response
 }
 
-/// A full-width clickable row with text on the left and `right` on the right.
+/// A full-width clickable row of text.
 fn text_row(
     ui: &mut egui::Ui,
     p: &Palette,
-    left: &str,
-    right: &str,
+    text: &str,
     color: egui::Color32,
     selected: bool,
 ) -> egui::Response {
@@ -373,20 +385,12 @@ fn text_row(
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, 4, p.selected);
     }
-    let font = FontId::proportional(13.0);
     ui.painter().text(
         rect.left_center() + vec2(8.0, 0.0),
         Align2::LEFT_CENTER,
-        left,
-        font.clone(),
+        text,
+        FontId::proportional(13.0),
         color,
-    );
-    ui.painter().text(
-        rect.right_center() - vec2(8.0, 0.0),
-        Align2::RIGHT_CENTER,
-        right,
-        FontId::monospace(12.0),
-        p.muted,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -398,12 +402,12 @@ fn engine_row(
     p: &Palette,
     row: &Row,
     selected: bool,
+    reveal: bool,
     full: bool,
 ) -> Option<PickerAction> {
     let Row::Engine {
         id,
         name,
-        shortcut,
         on_bar,
         custom,
     } = row
@@ -417,14 +421,8 @@ fn engine_row(
         name.clone()
     };
     let color = if addable { p.text } else { p.muted };
-    // Custom engines keep room on the right for their delete mark.
-    let right = if *custom {
-        format!("{shortcut}      ")
-    } else {
-        shortcut.clone()
-    };
-    let response = text_row(ui, p, &left, &right, color, selected);
-    if selected {
+    let response = text_row(ui, p, &left, color, selected);
+    if reveal {
         response.scroll_to_me(None);
     }
     let delete = custom.then(|| {
@@ -475,7 +473,6 @@ mod tests {
         CustomEngine {
             name: "Crates".into(),
             url: "https://crates.io/search?q={query}".into(),
-            shortcut: "cr".into(),
         }
     }
 
@@ -499,6 +496,7 @@ mod tests {
     #[test]
     fn own_engines_get_their_own_heading() {
         let mut c = Config::default();
+        c.remove_engine("chatgpt").unwrap();
         c.add_custom(crates());
         let list = names(&rows(&c, ""));
         assert_eq!(
@@ -508,10 +506,10 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_matches_names_and_shortcuts() {
+    fn a_filter_matches_names() {
         let c = Config::default();
         assert_eq!(names(&rows(&c, "git")), ["GitHub", "+"]);
-        assert_eq!(names(&rows(&c, "gh")), ["GitHub", "+"]);
+        assert_eq!(names(&rows(&c, "gh")), ["+"]);
         assert_eq!(names(&rows(&c, " YOU ")), ["YouTube \u{2713}", "+"]);
         assert_eq!(names(&rows(&c, "zzz")), ["+"]);
     }
@@ -527,7 +525,9 @@ mod tests {
 
     #[test]
     fn enter_adds_the_selected_engine() {
-        let c = Config::default();
+        // Room for one more: the default five fill the bar.
+        let mut c = Config::default();
+        c.remove_engine("chatgpt").unwrap();
         let mut picker = Picker::default();
         assert_eq!(
             picker.handle(Intent::Enter, &c),
@@ -572,12 +572,48 @@ mod tests {
         let form = picker.form.as_mut().unwrap();
         form.name = "Crates".into();
         form.url = "https://crates.io/search?q={query}".into();
-        form.shortcut = "CR".into();
         assert_eq!(
             picker.handle(Intent::Enter, &c),
             Some(PickerAction::AddCustom(crates()))
         );
         assert!(!picker.form_open());
+    }
+
+    #[test]
+    fn only_keys_scroll_the_selection_into_view() {
+        // Revealing on every frame would fight the mouse wheel.
+        let c = Config::default();
+        let mut picker = Picker::default();
+        assert!(!std::mem::take(&mut picker.reveal));
+        picker.handle(Intent::Down, &c);
+        assert!(std::mem::take(&mut picker.reveal));
+        assert!(!picker.reveal);
+        picker.handle(Intent::Up, &c);
+        assert!(std::mem::take(&mut picker.reveal));
+        picker.set_filter("g");
+        assert!(picker.reveal);
+    }
+
+    #[test]
+    fn the_list_is_full_height_even_in_a_short_window() {
+        // The window grows to fit what is drawn, so the list must not
+        // shrink to the room the window has before it grows.
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(640.0, 120.0),
+            )),
+            ..Default::default()
+        };
+        let mut used = 0.0;
+        let mut output = ctx.run_ui(raw, |ui| {
+            let top = ui.cursor().top();
+            Picker::default().draw(ui, &crate::theme::KANAGAWA, &Config::default(), 400.0);
+            used = ui.min_rect().bottom() - top;
+        });
+        output.textures_delta.clear();
+        assert!(used >= 399.0, "{used}");
     }
 
     #[test]

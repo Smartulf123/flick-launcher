@@ -115,9 +115,6 @@ pub struct FlickApp {
     picker: Option<Picker>,
     /// The chip being dragged to a new place, by position on the bar.
     dragging: Option<usize>,
-    /// Flick changed the typed text itself (a shortcut, Backspace back);
-    /// put the cursor at its end.
-    cursor_to_end: bool,
 }
 
 /// Loads the picture for `source` as a texture; `None` for no picture or on error.
@@ -161,7 +158,6 @@ impl FlickApp {
             menu_choice: None,
             picker: None,
             dragging: None,
-            cursor_to_end: false,
         }
     }
 
@@ -265,7 +261,7 @@ impl FlickApp {
                 }
             }),
             PickerAction::AddCustom(engine) => {
-                log::info!("added engine {} ({})", engine.name, engine.shortcut);
+                log::info!("added engine {} ({})", engine.name, engine.id());
                 self.change_engines(|c| c.add_custom(engine));
             }
             PickerAction::DeleteCustom(id) => self.change_engines(|c| c.remove_custom(&id)),
@@ -437,14 +433,6 @@ impl FlickApp {
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.close_gallery(ctx);
             return;
-        }
-        // Backspace in the empty box goes back from an engine reached by shortcut.
-        if self.picker.is_none()
-            && self.launcher.input().is_empty()
-            && ctx.input(|i| i.key_pressed(Key::Backspace))
-        {
-            self.launcher.handle(Intent::BackspaceOnEmpty);
-            self.cursor_to_end = true;
         }
 
         let window = ui.max_rect();
@@ -720,23 +708,7 @@ impl FlickApp {
                 if response.changed() {
                     match &mut self.picker {
                         Some(picker) => picker.set_filter(&text),
-                        None => {
-                            self.launcher.set_input(&text);
-                            // A shortcut was taken out of the text.
-                            self.cursor_to_end |= self.launcher.input() != text;
-                        }
-                    }
-                }
-                if std::mem::take(&mut self.cursor_to_end) {
-                    let end = self.launcher.input().chars().count();
-                    if let Some(mut state) =
-                        egui::text_edit::TextEditState::load(ui.ctx(), response.id)
-                    {
-                        let cursor = egui::text::CCursor::new(end);
-                        state
-                            .cursor
-                            .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
-                        state.store(ui.ctx(), response.id);
+                        None => self.launcher.set_input(&text),
                     }
                 }
             });
@@ -752,8 +724,9 @@ impl FlickApp {
             let mut action = None;
             card.show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                let height = results_height(ui, self.settings.config.max_results);
                 if let Some(picker) = &mut self.picker {
-                    action = picker.draw(ui, p, &self.settings.config);
+                    action = picker.draw(ui, p, &self.settings.config, height);
                 }
             });
             if let Some(action) = action {
@@ -811,7 +784,7 @@ impl FlickApp {
         Vec::new()
     }
 
-    /// The bar's chips, the shortcut engine in use and the "+" chip. Sets
+    /// The bar's chips and the "+" chip. Sets
     /// `clicked` for a chip click; returns a removal or a move to save.
     fn chip_row(
         &mut self,
@@ -897,9 +870,6 @@ impl FlickApp {
                 [egui::pos2(x, top), egui::pos2(x, bottom)],
                 egui::Stroke::new(2.0, p.accent),
             );
-        }
-        if let Some(name) = self.launcher.visiting() {
-            visiting_chip(ui, p, name);
         }
         if plus_chip(ui, p, self.picker.is_some()).clicked() {
             self.menu_open = false;
@@ -994,24 +964,6 @@ fn mode_chip(ui: &mut egui::Ui, p: &Palette, name: &str, active: bool) -> egui::
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// The engine reached by shortcut, shown after the chips while in use.
-fn visiting_chip(ui: &mut egui::Ui, p: &Palette, name: &str) {
-    egui::Frame::NONE
-        .fill(theme::chip_fill(p))
-        .stroke(egui::Stroke::new(1.0, p.accent))
-        .corner_radius(8)
-        .inner_margin(egui::Margin::symmetric(10, 4))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
-            ui.horizontal(|ui| {
-                icon_slot(ui, Icon::for_mode(name), 14.0, p.accent);
-                ui.label(RichText::new(name).size(13.0).color(p.accent));
-            });
-        })
-        .response
-        .on_hover_text("Reached by shortcut; Tab goes back to your engines");
-}
-
 /// The "+" at the end of the chips; opens and closes the engine list.
 fn plus_chip(ui: &mut egui::Ui, p: &Palette, open: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(26.0, 26.0), egui::Sense::click());
@@ -1098,6 +1050,17 @@ fn row_icon(
             String::new()
         }
     }
+}
+
+/// Height of `rows` results as `result_row` draws them (title and path).
+fn results_height(ui: &egui::Ui, rows: usize) -> f32 {
+    const MARGIN: f32 = 5.0;
+    let text = ui.text_style_height(&egui::TextStyle::Body)
+        + 1.0
+        + ui.text_style_height(&egui::TextStyle::Small);
+    let row = 2.0 * MARGIN + text.max(ICON_SIZE);
+    let rows = rows.max(1) as f32;
+    rows * row + (rows - 1.0) * ui.spacing().item_spacing.y
 }
 
 /// One result: icon, title, a one-line path, and the kind label on the right.

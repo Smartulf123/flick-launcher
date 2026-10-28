@@ -2,14 +2,14 @@
 
 **A fast keyboard launcher for Windows, macOS and Linux, written in Rust.**
 
-Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. You choose which search engines sit on the bar (up to six); out of the box:
+Press **Alt+Space** (Option+Space on a Mac, Ctrl+Alt+Space on Linux) anywhere and a small search bar appears in the middle of your screen. Type, press Enter, and it's gone. You choose which search engines sit on the bar (up to five); out of the box:
 
 - **Google**: Enter opens a Google search in your default browser, with suggestions as you type.
 - **YouTube**: the same, for YouTube search results.
 - **Files**: fuzzy search over your own Desktop, Documents and Downloads folders as you type (`bdgt` finds `budget_2026.xlsx`). On Windows, files and folders show their real Windows icons.
 - **Wikipedia** and **ChatGPT**.
 
-Swap them for any of 23 engines (DuckDuckGo, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own, and reach every one of them with a short shortcut, such as `gh egui` for GitHub.
+Swap them for any of 23 engines (DuckDuckGo, Claude, Spotify, GitHub, Maps, Amazon, Reddit and more) or add your own.
 
 It runs quietly in the tray (the menu bar on a Mac), starts when you log in, and sits on a background picture you choose: one of six classic paintings and space photos that come with it, a picture of your own, or any wallpaper you find through the built-in online gallery.
 
@@ -58,7 +58,6 @@ The macOS and Linux versions are new and have not been tried by hand on every se
 | **Alt+Space** (Mac: Option+Space, Linux: Ctrl+Alt+Space) | Show or hide the bar |
 | Type, then **Enter** | Search, or open the selected file |
 | **Tab** / **Shift+Tab** | Switch between the engines on the bar |
-| A shortcut and a space, e.g. `gh egui` | Search that engine, even one not on the bar (**Backspace** in the empty box goes back) |
 | **↑** / **↓** | Pick a result |
 | **Esc**, or click elsewhere | Hide the bar |
 | Drag the edges of the bar | Move it |
@@ -68,18 +67,18 @@ You can also click an engine chip or a result with the mouse. The gear at the to
 
 ### Search engines
 
-Click **+** at the end of the engine chips to see every engine, grouped, with its shortcut; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar. Hover a chip and click its **×** to take it off, or drag it to a new place. The bar holds one to six engines. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`) and a shortcut.
+Click **+** at the end of the engine chips to see every engine, grouped; type to filter the list, and click one (or pick it with the arrows and Enter) to put it on the bar. Hover a chip and click its **×** to take it off, or drag it to a new place. The bar holds one to five engines; to swap one in when it is full, take one off first. **+ Add your own...** at the bottom of the list adds any site that has a search address: give it a name, the address with `{query}` where your text goes (for example `https://www.thingiverse.com/search?q={query}`).
 
-| Group | Engines (shortcut) |
+| Group | Engines |
 |---|---|
-| On this PC | Files (`fi`) |
-| Web search | Google (`gg`), DuckDuckGo (`ddg`), Bing (`bi`), Brave (`brv`) |
-| AI | ChatGPT (`gpt`), Claude (`cl`), Perplexity (`pp`) |
-| Video & music | YouTube (`yt`), Spotify (`sp`), Twitch (`tw`) |
-| Knowledge | Wikipedia (`wp`), Maps (`mp`), Translate (`tr`) |
-| Code | GitHub (`gh`), Stack Overflow (`st`), MDN (`mdn`), docs.rs (`rs`) |
-| Shopping | Amazon (`amz`), eBay (`eb`) |
-| Social | Reddit (`rd`), X (`xx`), LinkedIn (`li`) |
+| On this PC | Files |
+| Web search | Google, DuckDuckGo, Bing, Brave |
+| AI | ChatGPT, Claude, Perplexity |
+| Video & music | YouTube, Spotify, Twitch |
+| Knowledge | Wikipedia, Maps, Translate |
+| Code | GitHub, Stack Overflow, MDN, docs.rs |
+| Shopping | Amazon, eBay |
+| Social | Reddit, X, LinkedIn |
 
 Google, YouTube, Wikipedia and DuckDuckGo show suggestions as you type. Wikipedia and Amazon use their English and US sites; add your own country's as a custom engine.
 
@@ -107,7 +106,7 @@ Flick creates `config.toml` the first time it runs: in `%APPDATA%\flick` on Wind
 | `hotkey` | `"Alt+Space"` (Linux: `"Ctrl+Alt+Space"`) | The key that shows the bar. Easiest to set with **Change hotkey...** in the gear or tray menu; by hand, modifiers are `Alt` (Option on a Mac), `Ctrl`, `Shift`, `Super` (the Windows key, or Cmd on a Mac), e.g. `"Ctrl+Space"`. |
 | `default_mode` | `"google"` | Engine the bar opens in, by its id (`google`, `files`, `github`, ...). If it is not on the bar, the first engine is used. |
 | `engines` | `["google", "youtube", "files", "wikipedia", "chatgpt"]` | The engines on the bar, in order. Easiest to change with **+** on the bar. |
-| `custom_engines` | none | Engines you added: `name`, `url` (with `{query}`) and `shortcut`. |
+| `custom_engines` | none | Engines you added: `name` and `url` (with `{query}`). |
 | `max_results` | `8` | Most results shown at once. |
 | `suggestions` | `true` | Suggestions while you type, for Google, YouTube, Wikipedia and DuckDuckGo. |
 | `files.roots` | `[]` | Folders to search. Empty means your Desktop, Documents and Downloads. Example: `roots = ['C:\Users\you\Projects', 'D:\Photos']` |
@@ -150,12 +149,12 @@ It is light: a single program of about 10 MB that uses no CPU while hidden and a
 
 ### Adding an engine
 
-A website is one line in `CATALOG` in `crates/flick-core/src/catalog.rs`: id, name, group, shortcut and the search address with `{query}`.
+A website is one line in `CATALOG` in `crates/flick-core/src/catalog.rs`: id, name, group and the search address with `{query}`.
 
 Anything else is a mode:
 
 1. Add a file in `crates/flick-core/src/modes/` with a type that implements `SearchMode` (`id`, `name`, `query`).
-2. Give it a `Target` in the catalog and register it in `config::build_modes_with`; it can then go on the bar and has a shortcut.
+2. Give it a `Target` in the catalog and register it in `config::build_modes_with`; it can then go on the bar.
 
 Each mode returns results with a title, subtitle, score and an action (`OpenUrl`, `OpenPath` or `None`). Ideas: apps, Windows settings, a calculator.
 
