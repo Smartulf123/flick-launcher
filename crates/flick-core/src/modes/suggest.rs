@@ -1,4 +1,4 @@
-//! Search suggestions for Google and YouTube: the request address, reading
+//! Search suggestions (Google, YouTube, Wikipedia, DuckDuckGo): the request address, reading
 //! the reply, and a shared cache. Fetching is the app's job (behind
 //! `SuggestionSource`), so this module never touches the network.
 
@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex};
 pub enum Engine {
     Google,
     YouTube,
+    Wikipedia,
+    DuckDuckGo,
 }
 
 /// Fetches suggestions in the background and stores them in the cache.
@@ -73,15 +75,31 @@ pub struct Suggestions {
     pub source: Arc<dyn SuggestionSource>,
 }
 
-/// The suggestion address browsers use. It is not an official, documented
-/// API: if Google changes it, suggestions stop and searching still works.
+/// The suggestion address for `engine`. Google's is the one browsers use,
+/// not an official API: if it changes, suggestions stop and searching
+/// still works.
 pub fn suggest_url(engine: Engine, query: &str) -> String {
-    let mut params = vec![("client", "firefox"), ("ie", "utf-8"), ("oe", "utf-8")];
+    let (base, mut params) = match engine {
+        Engine::Wikipedia => (
+            "https://en.wikipedia.org/w/api.php",
+            vec![("action", "opensearch"), ("limit", "8")],
+        ),
+        Engine::DuckDuckGo => ("https://duckduckgo.com/ac/", vec![("type", "list")]),
+        Engine::Google | Engine::YouTube => (
+            "https://suggestqueries.google.com/complete/search",
+            vec![("client", "firefox"), ("ie", "utf-8"), ("oe", "utf-8")],
+        ),
+    };
     if engine == Engine::YouTube {
         params.push(("ds", "yt"));
     }
-    params.push(("q", query));
-    url::Url::parse_with_params("https://suggestqueries.google.com/complete/search", &params)
+    let key = if engine == Engine::Wikipedia {
+        "search"
+    } else {
+        "q"
+    };
+    params.push((key, query));
+    url::Url::parse_with_params(base, &params)
         .map(String::from)
         .unwrap_or_default()
 }
@@ -134,6 +152,29 @@ mod tests {
         assert_eq!(
             suggest_url(Engine::YouTube, "lofi"),
             "https://suggestqueries.google.com/complete/search?client=firefox&ie=utf-8&oe=utf-8&ds=yt&q=lofi"
+        );
+    }
+
+    #[test]
+    fn wikipedia_and_duckduckgo_addresses() {
+        assert_eq!(
+            suggest_url(Engine::Wikipedia, "blå bær"),
+            "https://en.wikipedia.org/w/api.php?action=opensearch&limit=8&search=bl%C3%A5+b%C3%A6r"
+        );
+        assert_eq!(
+            suggest_url(Engine::DuckDuckGo, "rust"),
+            "https://duckduckgo.com/ac/?type=list&q=rust"
+        );
+    }
+
+    #[test]
+    fn reads_wikipedia_replies() {
+        // OpenSearch: query, titles, descriptions, links.
+        let json =
+            r#"["rust",["Rust","Rust (programming language)"],["",""],["https://a","https://b"]]"#;
+        assert_eq!(
+            parse_suggestions(json),
+            ["Rust", "Rust (programming language)"]
         );
     }
 

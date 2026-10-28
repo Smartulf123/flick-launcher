@@ -1,62 +1,80 @@
-//! Google and YouTube: a row that searches what you typed, then (when
+//! Web engines (Google, YouTube, GitHub, custom ones...): a row that
+//! searches what you typed, then (for engines that have them, when
 //! suggestions are on) the engine's suggestions as further rows.
 
+use crate::catalog::{self, CustomEngine, EngineSpec, Target};
 use crate::mode::{Action, ResultItem, ResultKind, SearchMode};
 use crate::modes::suggest::{Engine, Suggestions};
 
-/// A mode that turns the query into search URLs.
+/// A mode that fills the text into an address with `{query}`.
 pub struct WebSearchMode {
-    id: &'static str,
-    name: &'static str,
-    base_url: &'static str,
-    param: &'static str,
-    engine: Engine,
+    id: String,
+    name: String,
+    url: String,
+    engine: Option<Engine>,
     suggestions: Option<Suggestions>,
 }
 
 impl WebSearchMode {
-    pub fn google() -> Self {
+    /// A built-in web engine; `None` for one that is not a website.
+    pub fn from_spec(spec: &EngineSpec) -> Option<Self> {
+        let Target::Web { url, suggest } = spec.target else {
+            return None;
+        };
+        Some(Self {
+            id: spec.id.to_owned(),
+            name: spec.name.to_owned(),
+            url: url.to_owned(),
+            engine: suggest,
+            suggestions: None,
+        })
+    }
+
+    /// An engine someone added; it has no suggestions.
+    pub fn custom(engine: &CustomEngine) -> Self {
         Self {
-            id: "google",
-            name: "Google",
-            base_url: "https://www.google.com/search",
-            param: "q",
-            engine: Engine::Google,
+            id: engine.id(),
+            name: engine.name.clone(),
+            url: engine.url.clone(),
+            engine: None,
             suggestions: None,
         }
+    }
+
+    /// The catalog's engine with this id. Panics if it is not a website.
+    pub fn builtin(id: &str) -> Self {
+        catalog::find(id)
+            .and_then(Self::from_spec)
+            .unwrap_or_else(|| panic!("no web engine {id}"))
+    }
+
+    pub fn google() -> Self {
+        Self::builtin("google")
     }
 
     pub fn youtube() -> Self {
-        Self {
-            id: "youtube",
-            name: "YouTube",
-            base_url: "https://www.youtube.com/results",
-            param: "search_query",
-            engine: Engine::YouTube,
-            suggestions: None,
-        }
+        Self::builtin("youtube")
     }
 
-    /// Shows the engine's suggestions under the search row.
+    /// Shows the engine's suggestions under the search row (for engines
+    /// that have them).
     pub fn with_suggestions(mut self, suggestions: Suggestions) -> Self {
         self.suggestions = Some(suggestions);
         self
     }
 
-    fn search_url(&self, text: &str) -> Option<String> {
-        url::Url::parse_with_params(self.base_url, &[(self.param, text)])
-            .ok()
-            .map(String::from)
+    fn search_url(&self, text: &str) -> String {
+        catalog::fill(&self.url, text)
     }
 }
 
 impl SearchMode for WebSearchMode {
     fn id(&self) -> &str {
-        self.id
+        &self.id
     }
 
     fn name(&self) -> &str {
-        self.name
+        &self.name
     }
 
     fn query(&self, text: &str, max_results: usize) -> Vec<ResultItem> {
@@ -64,9 +82,7 @@ impl SearchMode for WebSearchMode {
         if text.is_empty() {
             return Vec::new();
         }
-        let Some(url) = self.search_url(text) else {
-            return Vec::new();
-        };
+        let url = self.search_url(text);
         let mut rows = vec![ResultItem {
             title: format!("Search {} for \"{text}\"", self.name),
             subtitle: url.clone(),
@@ -75,26 +91,26 @@ impl SearchMode for WebSearchMode {
             kind: ResultKind::Web,
         }];
 
-        if let Some(suggestions) = &self.suggestions {
-            let list = suggestions.cache.get(self.engine, text).or_else(|| {
-                suggestions.source.request(self.engine, text);
+        if let (Some(suggestions), Some(engine)) = (&self.suggestions, self.engine) {
+            let list = suggestions.cache.get(engine, text).or_else(|| {
+                suggestions.source.request(engine, text);
                 // Until they arrive, keep the last suggestions for what was
                 // typed before, so the list does not shrink and grow per key.
-                suggestions.cache.best_prefix(self.engine, text)
+                suggestions.cache.best_prefix(engine, text)
             });
             rows.extend(
                 list.unwrap_or_default()
                     .into_iter()
                     .filter(|s| !s.eq_ignore_ascii_case(text))
-                    .filter_map(|s| {
-                        let url = self.search_url(&s)?;
-                        Some(ResultItem {
+                    .map(|s| {
+                        let url = self.search_url(&s);
+                        ResultItem {
                             title: s,
                             subtitle: String::new(),
                             score: 0,
                             action: Action::OpenUrl(url),
                             kind: ResultKind::Web,
-                        })
+                        }
                     }),
             );
         }
@@ -114,7 +130,7 @@ mod tests {
         assert_eq!(r.len(), 1);
         assert_eq!(
             r[0].action,
-            Action::OpenUrl("https://www.google.com/search?q=rust+%26+egui".into())
+            Action::OpenUrl("https://www.google.com/search?q=rust%20%26%20egui".into())
         );
         assert_eq!(r[0].title, "Search Google for \"rust & egui\"");
     }
@@ -124,7 +140,7 @@ mod tests {
         let r = WebSearchMode::youtube().query("lofi beats", 8);
         assert_eq!(
             r[0].action,
-            Action::OpenUrl("https://www.youtube.com/results?search_query=lofi+beats".into())
+            Action::OpenUrl("https://www.youtube.com/results?search_query=lofi%20beats".into())
         );
     }
 
@@ -133,7 +149,52 @@ mod tests {
         let r = WebSearchMode::google().query("blåbær 🍓", 8);
         assert_eq!(
             r[0].action,
-            Action::OpenUrl("https://www.google.com/search?q=bl%C3%A5b%C3%A6r+%F0%9F%8D%93".into())
+            Action::OpenUrl(
+                "https://www.google.com/search?q=bl%C3%A5b%C3%A6r%20%F0%9F%8D%93".into()
+            )
+        );
+    }
+
+    #[test]
+    fn every_catalog_website_becomes_a_mode() {
+        let gh = WebSearchMode::builtin("github");
+        assert_eq!((gh.id(), gh.name()), ("github", "GitHub"));
+        assert_eq!(
+            gh.query("egui", 8)[0].action,
+            Action::OpenUrl("https://github.com/search?q=egui".into())
+        );
+        assert!(WebSearchMode::from_spec(crate::catalog::find("files").unwrap()).is_none());
+    }
+
+    #[test]
+    fn custom_engines_search_their_address() {
+        let mode = WebSearchMode::custom(&crate::catalog::CustomEngine {
+            name: "Crates".into(),
+            url: "https://crates.io/search?q={query}".into(),
+        });
+        assert_eq!((mode.id(), mode.name()), ("custom:crates", "Crates"));
+        let r = mode.query("serde json", 8);
+        assert_eq!(r[0].title, "Search Crates for \"serde json\"");
+        assert_eq!(
+            r[0].action,
+            Action::OpenUrl("https://crates.io/search?q=serde%20json".into())
+        );
+    }
+
+    #[test]
+    fn engines_without_type_ahead_ask_for_nothing() {
+        let (mode, _, recorder) = with_suggestions(WebSearchMode::builtin("github"));
+        assert_eq!(mode.query("egui", 8).len(), 1);
+        assert!(recorder.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn wikipedia_asks_wikipedia_for_suggestions() {
+        let (mode, _, recorder) = with_suggestions(WebSearchMode::builtin("wikipedia"));
+        mode.query("rust", 8);
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            [(Engine::Wikipedia, "rust".to_owned())]
         );
     }
 
@@ -188,7 +249,7 @@ mod tests {
         assert_eq!(titles, ["Search Google for \"rus\"", "rust", "rust game"]);
         assert_eq!(
             r[2].action,
-            Action::OpenUrl("https://www.google.com/search?q=rust+game".into())
+            Action::OpenUrl("https://www.google.com/search?q=rust%20game".into())
         );
         assert_eq!(r[2].kind, ResultKind::Web);
         assert!(recorder.0.lock().unwrap().is_empty());

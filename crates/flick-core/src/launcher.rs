@@ -1,8 +1,8 @@
-//! The search bar's state: input, active mode, results and selection.
+//! The search bar's state: input, active engine, results and selection.
 //! The app turns key presses into `Intent`s and carries out the returned `Effect`s.
 
 use crate::mode::{Action, ResultItem};
-use crate::registry::ModeRegistry;
+use crate::registry::{ModeRegistry, Modes};
 
 /// A key press the search bar cares about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +24,8 @@ pub enum Effect {
 
 pub struct Launcher {
     registry: ModeRegistry,
+    /// Registry indices of the bar's engines, in Tab order.
+    chips: Vec<usize>,
     default_mode: usize,
     active: usize,
     max_results: usize,
@@ -33,11 +35,12 @@ pub struct Launcher {
 }
 
 impl Launcher {
-    pub fn new(registry: ModeRegistry, default_mode: usize, max_results: usize) -> Self {
+    pub fn new(modes: Modes, max_results: usize) -> Self {
         Self {
-            registry,
-            default_mode,
-            active: default_mode,
+            registry: modes.registry,
+            chips: modes.chips,
+            default_mode: modes.default,
+            active: modes.default,
             max_results,
             input: String::new(),
             results: Vec::new(),
@@ -69,7 +72,7 @@ impl Launcher {
         self.selected = index.min(self.results.len().saturating_sub(1));
     }
 
-    /// Name of the mode that answers the input.
+    /// Name of the engine that answers the input.
     pub fn active_mode_name(&self) -> &str {
         self.registry.mode(self.active).name()
     }
@@ -80,8 +83,15 @@ impl Launcher {
             Intent::Down => {
                 self.selected = (self.selected + 1).min(self.results.len().saturating_sub(1));
             }
-            Intent::Tab => self.select_mode(self.registry.next(self.active)),
-            Intent::ShiftTab => self.select_mode(self.registry.prev(self.active)),
+            Intent::Tab => {
+                let next = self.active_chip().map_or(0, |c| (c + 1) % self.chips.len());
+                self.select_chip(next);
+            }
+            Intent::ShiftTab => {
+                let n = self.chips.len();
+                let prev = self.active_chip().map_or(n - 1, |c| (c + n - 1) % n);
+                self.select_chip(prev);
+            }
             Intent::Enter => {
                 let action = match self.results.get(self.selected) {
                     Some(item) if item.action != Action::None => item.action.clone(),
@@ -105,7 +115,7 @@ impl Launcher {
         self.selected = self.selected.min(self.results.len().saturating_sub(1));
     }
 
-    /// Back to an empty bar in the default mode.
+    /// Back to an empty bar in the default engine.
     pub fn reset(&mut self) {
         self.input.clear();
         self.results.clear();
@@ -113,25 +123,25 @@ impl Launcher {
         self.active = self.default_mode;
     }
 
-    /// Every mode's name, in Tab order.
-    pub fn modes(&self) -> Vec<&str> {
-        (0..self.registry.len())
-            .map(|i| self.registry.mode(i).name())
+    /// The bar's engine names, in Tab order.
+    pub fn chips(&self) -> Vec<&str> {
+        self.chips
+            .iter()
+            .map(|&i| self.registry.mode(i).name())
             .collect()
     }
 
-    /// Index (into `modes()`) of the mode that answers the input.
-    pub fn active_mode(&self) -> usize {
-        self.active
+    /// Position (in `chips()`) of the engine that answers the input.
+    pub fn active_chip(&self) -> Option<usize> {
+        self.chips.iter().position(|&i| i == self.active)
     }
 
-    /// Makes `index` the active mode and searches the same text there.
+    /// Makes chip `index` the active engine and searches the same text there.
     /// Panics if `index` is out of range.
-    pub fn select_mode(&mut self, index: usize) {
-        assert!(index < self.registry.len(), "no mode {index}");
-        self.active = index;
-        let text = std::mem::take(&mut self.input);
-        self.set_input(&text);
+    pub fn select_chip(&mut self, index: usize) {
+        self.active = self.chips[index];
+        self.selected = 0;
+        self.run_query();
     }
 
     fn run_query(&mut self) {
@@ -148,7 +158,7 @@ mod tests {
     use crate::index::{FileEntry, FileIndex, SharedIndex};
     use crate::mode::Action;
     use crate::modes::{FilesMode, WebSearchMode};
-    use crate::registry::ModeRegistry;
+    use crate::registry::{ModeRegistry, Modes};
     use std::path::PathBuf;
 
     const YOUTUBE: usize = 1;
@@ -166,25 +176,33 @@ mod tests {
         let index = SharedIndex::default();
         *index.write().unwrap() = Some(FileIndex { entries });
 
+        // Google, YouTube and Files on the bar; GitHub registered but not on it.
         let mut r = ModeRegistry::new();
         r.register(Box::new(WebSearchMode::google()));
         r.register(Box::new(WebSearchMode::youtube()));
         r.register(Box::new(FilesMode::new(index)));
-        Launcher::new(r, 0, 8)
+        r.register(Box::new(WebSearchMode::builtin("github")));
+        let modes = Modes {
+            registry: r,
+            chips: vec![0, 1, 2],
+            default: 0,
+        };
+        Launcher::new(modes, 8)
     }
 
     #[test]
-    fn typing_a_mode_name_does_not_switch_modes() {
+    fn typing_never_switches_engines() {
         let mut l = launcher();
-        l.set_input("yt lofi");
-        assert_eq!(l.active_mode_name(), "Google");
-        assert_eq!(l.results()[0].title, "Search Google for \"yt lofi\"");
+        for text in ["yt lofi", "gh egui", "files x"] {
+            l.set_input(text);
+            assert_eq!((l.active_mode_name(), l.input()), ("Google", text));
+        }
     }
 
     #[test]
     fn enter_runs_selected_then_hides_and_resets() {
         let mut l = launcher();
-        l.select_mode(YOUTUBE);
+        l.select_chip(YOUTUBE);
         l.set_input("lofi");
         assert_eq!(
             l.handle(Intent::Enter),
@@ -202,7 +220,7 @@ mod tests {
     fn enter_with_nothing_runnable_does_nothing() {
         let mut l = launcher();
         assert!(l.handle(Intent::Enter).is_empty());
-        l.select_mode(FILES);
+        l.select_chip(FILES);
         l.set_input("zzzz");
         assert!(l.handle(Intent::Enter).is_empty());
     }
@@ -222,7 +240,7 @@ mod tests {
     #[test]
     fn arrows_move_and_clamp() {
         let mut l = launcher();
-        l.select_mode(FILES);
+        l.select_chip(FILES);
         l.set_input("e");
         assert_eq!(l.results().len(), 3);
         l.handle(Intent::Up);
@@ -238,7 +256,7 @@ mod tests {
     #[test]
     fn select_picks_a_row_and_clamps() {
         let mut l = launcher();
-        l.select_mode(FILES);
+        l.select_chip(FILES);
         l.set_input("e");
         l.select(1);
         assert_eq!(l.selected(), 1);
@@ -247,16 +265,16 @@ mod tests {
     }
 
     #[test]
-    fn lists_mode_names_in_tab_order() {
-        assert_eq!(launcher().modes(), vec!["Google", "YouTube", "Files"]);
+    fn lists_the_bar_engines_in_tab_order() {
+        assert_eq!(launcher().chips(), vec!["Google", "YouTube", "Files"]);
     }
 
     #[test]
     fn select_mode_switches_and_searches_again() {
         let mut l = launcher();
         l.set_input("notes");
-        l.select_mode(FILES);
-        assert_eq!(l.active_mode(), FILES);
+        l.select_chip(FILES);
+        assert_eq!(l.active_chip(), Some(FILES));
         assert_eq!((l.input(), l.active_mode_name()), ("notes", "Files"));
         assert_eq!(l.results()[0].title, "notes.md");
     }
@@ -264,9 +282,9 @@ mod tests {
     #[test]
     fn escape_hides_and_resets() {
         let mut l = launcher();
-        l.select_mode(FILES);
+        l.select_chip(FILES);
         l.set_input("rust");
         assert_eq!(l.handle(Intent::Escape), vec![Effect::Hide]);
-        assert_eq!((l.input(), l.active_mode()), ("", 0));
+        assert_eq!((l.input(), l.active_chip()), ("", Some(0)));
     }
 }

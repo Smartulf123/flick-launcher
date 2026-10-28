@@ -86,7 +86,7 @@ impl Icon {
             "Google" => Icon::Google,
             "YouTube" => Icon::YouTube,
             "Files" => Icon::Folder,
-            _ => Icon::Search,
+            _ => Icon::Web,
         }
     }
 
@@ -244,7 +244,8 @@ mod tests {
         assert_eq!(Icon::for_mode("Google"), Icon::Google);
         assert_eq!(Icon::for_mode("YouTube"), Icon::YouTube);
         assert_eq!(Icon::for_mode("Files"), Icon::Folder);
-        assert_eq!(Icon::for_mode("Something new"), Icon::Search);
+        // Every other engine is a website.
+        assert_eq!(Icon::for_mode("GitHub"), Icon::Web);
     }
 
     #[test]

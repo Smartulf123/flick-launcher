@@ -43,6 +43,15 @@ impl ModeRegistry {
     }
 }
 
+/// Every engine Flick can search and which of them are on the bar.
+pub struct Modes {
+    pub registry: ModeRegistry,
+    /// Registry indices of the bar's engines, in Tab order. Never empty.
+    pub chips: Vec<usize>,
+    /// Registry index of the engine the bar opens in; always one of `chips`.
+    pub default: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
