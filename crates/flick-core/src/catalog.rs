@@ -1,17 +1,9 @@
-//! Every engine Flick knows: the built-in catalog, and engines people add
-//! themselves.
-
-use std::fmt;
-
-use serde::{Deserialize, Serialize};
+//! Every engine Flick knows: the built-in catalog.
 
 use crate::modes::suggest::Engine;
 
 /// Where the search text goes in an engine's address.
 pub const QUERY: &str = "{query}";
-
-/// A custom engine's id is this followed by its name in lowercase.
-pub const CUSTOM_PREFIX: &str = "custom:";
 
 /// The headings the engine list is grouped under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,88 +151,6 @@ fn encode(text: &str) -> String {
     out
 }
 
-/// An engine someone added: a name and an address with `{query}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CustomEngine {
-    pub name: String,
-    pub url: String,
-}
-
-impl CustomEngine {
-    /// `custom:` and the name in lowercase, with a dash for each run of
-    /// anything but letters and digits ("Thingi Verse!" is `custom:thingi-verse`).
-    pub fn id(&self) -> String {
-        let mut slug = String::new();
-        for c in self.name.trim().chars().flat_map(char::to_lowercase) {
-            if c.is_alphanumeric() {
-                slug.push(c);
-            } else if !slug.is_empty() && !slug.ends_with('-') {
-                slug.push('-');
-            }
-        }
-        format!("{CUSTOM_PREFIX}{}", slug.trim_end_matches('-'))
-    }
-}
-
-/// Why a custom engine was refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CustomError {
-    NameEmpty,
-    NameTooLong,
-    NotHttps,
-    NoQuery,
-    BadAddress,
-    /// One of the person's own engines already has this name.
-    NameTaken(String),
-}
-
-impl fmt::Display for CustomError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CustomError::NameEmpty => write!(f, "Give it a name"),
-            CustomError::NameTooLong => write!(f, "Keep the name to 20 characters"),
-            CustomError::NotHttps => write!(f, "The address must start with https://"),
-            CustomError::NoQuery => write!(f, "Put {QUERY} where the search text goes"),
-            CustomError::BadAddress => write!(f, "That is not a web address"),
-            CustomError::NameTaken(name) => write!(f, "You already have an engine called {name}"),
-        }
-    }
-}
-
-/// Checks a new custom engine against the rules and the person's other
-/// engines, returning it trimmed.
-pub fn check_custom(
-    name: &str,
-    url: &str,
-    existing: &[CustomEngine],
-) -> Result<CustomEngine, CustomError> {
-    let (name, url) = (name.trim(), url.trim());
-    if !name.chars().any(char::is_alphanumeric) {
-        return Err(CustomError::NameEmpty);
-    }
-    if name.chars().count() > 20 {
-        return Err(CustomError::NameTooLong);
-    }
-    if !url.starts_with("https://") {
-        return Err(CustomError::NotHttps);
-    }
-    if !url.contains(QUERY) {
-        return Err(CustomError::NoQuery);
-    }
-    match url::Url::parse(&fill(url, "test")) {
-        Ok(parsed) if parsed.host_str().is_some_and(|h| h.contains('.')) => {}
-        _ => return Err(CustomError::BadAddress),
-    }
-    let engine = CustomEngine {
-        name: name.to_owned(),
-        url: url.to_owned(),
-    };
-    if let Some(same) = existing.iter().find(|c| c.id() == engine.id()) {
-        return Err(CustomError::NameTaken(same.name.clone()));
-    }
-    Ok(engine)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,77 +225,6 @@ mod tests {
         assert_eq!(
             fill("https://x/?a={query}&b={query}", "1 2"),
             "https://x/?a=1%202&b=1%202"
-        );
-    }
-
-    fn mine() -> Vec<CustomEngine> {
-        vec![CustomEngine {
-            name: "Thingiverse".into(),
-            url: "https://www.thingiverse.com/search?q={query}".into(),
-        }]
-    }
-
-    #[test]
-    fn a_good_custom_engine_is_cleaned_up() {
-        let c = check_custom(" Crates ", " https://crates.io/search?q={query} ", &mine()).unwrap();
-        assert_eq!(c.name, "Crates");
-        assert_eq!(c.url, "https://crates.io/search?q={query}");
-        assert_eq!(c.id(), "custom:crates");
-    }
-
-    #[test]
-    fn custom_ids_come_from_the_name() {
-        let id = |name: &str| {
-            CustomEngine {
-                name: name.into(),
-                url: String::new(),
-            }
-            .id()
-        };
-        assert_eq!(id("Thingi Verse!"), "custom:thingi-verse");
-        assert_eq!(id("  Blå  bær "), "custom:blå-bær");
-        assert_eq!(id("A.B"), "custom:a-b");
-    }
-
-    #[test]
-    fn custom_engine_mistakes_are_named() {
-        let ok_url = "https://a.com/?q={query}";
-        assert_eq!(check_custom("", ok_url, &[]), Err(CustomError::NameEmpty));
-        assert_eq!(
-            check_custom(" !? ", ok_url, &[]),
-            Err(CustomError::NameEmpty)
-        );
-        assert_eq!(
-            check_custom(&"x".repeat(21), ok_url, &[]),
-            Err(CustomError::NameTooLong)
-        );
-        assert_eq!(
-            check_custom("A", "http://a.com/?q={query}", &[]),
-            Err(CustomError::NotHttps)
-        );
-        assert_eq!(
-            check_custom("A", "https://a.com/?q=", &[]),
-            Err(CustomError::NoQuery)
-        );
-        assert_eq!(
-            check_custom("A", "https://{query}", &[]),
-            Err(CustomError::BadAddress)
-        );
-        assert_eq!(
-            check_custom("thingiverse", ok_url, &mine()),
-            Err(CustomError::NameTaken("Thingiverse".into()))
-        );
-    }
-
-    #[test]
-    fn mistakes_read_as_plain_words() {
-        assert_eq!(
-            CustomError::NameTaken("Crates".into()).to_string(),
-            "You already have an engine called Crates"
-        );
-        assert_eq!(
-            CustomError::NoQuery.to_string(),
-            "Put {query} where the search text goes"
         );
     }
 }

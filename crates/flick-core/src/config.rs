@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::apps::SharedApps;
-use crate::catalog::{self, CustomEngine, Target};
+use crate::catalog::{self, Target};
 use crate::index::SharedIndex;
 use crate::modes::suggest::Suggestions;
 use crate::modes::{AppsMode, FilesMode, WebSearchMode};
@@ -30,8 +30,6 @@ pub struct Config {
     pub engines: Vec<String>,
     pub files: FilesConfig,
     pub appearance: Appearance,
-    /// Engines people added themselves.
-    pub custom_engines: Vec<CustomEngine>,
 }
 
 /// The bar holds at least one engine and at most five.
@@ -54,24 +52,18 @@ pub enum EngineChange {
 }
 
 impl Config {
-    /// Whether `id` names a catalog engine or one of the custom engines.
+    /// Whether `id` names an engine in the catalog.
     pub fn knows_engine(&self, id: &str) -> bool {
-        catalog::find(id).is_some() || self.custom_engines.iter().any(|c| c.id() == id)
+        catalog::find(id).is_some()
     }
 
-    /// The search address (with `{query}`) of a website engine, built-in
-    /// or custom; `None` for Files, Apps and unknown ids.
+    /// The search address (with `{query}`) of a website engine; `None` for
+    /// Files, Apps and unknown ids.
     pub fn engine_url(&self, id: &str) -> Option<String> {
-        if let Some(spec) = catalog::find(id) {
-            return match spec.target {
-                Target::Web { url, .. } => Some(url.to_owned()),
-                Target::Files | Target::Apps => None,
-            };
+        match catalog::find(id)?.target {
+            Target::Web { url, .. } => Some(url.to_owned()),
+            Target::Files | Target::Apps => None,
         }
-        self.custom_engines
-            .iter()
-            .find(|c| c.id() == id)
-            .map(|c| c.url.clone())
     }
 
     /// The bar's engines: unknown ids and repeats dropped, at most five;
@@ -148,20 +140,6 @@ impl Config {
             let id = chips.remove(from);
             chips.insert(to.min(chips.len()), id);
         }
-        self.engines = chips;
-    }
-
-    /// Adds a checked custom engine, and puts it on the bar if there is room.
-    pub fn add_custom(&mut self, engine: CustomEngine) {
-        let id = engine.id();
-        self.custom_engines.push(engine);
-        let _ = self.add_engine(&id);
-    }
-
-    /// Deletes a custom engine and takes it off the bar.
-    pub fn remove_custom(&mut self, id: &str) {
-        let chips: Vec<String> = self.chips().into_iter().filter(|c| c != id).collect();
-        self.custom_engines.retain(|c| c.id() != id);
         self.engines = chips;
     }
 }
@@ -255,7 +233,6 @@ impl Default for Config {
             engines: DEFAULT_ENGINES.map(String::from).to_vec(),
             files: FilesConfig::default(),
             appearance: Appearance::default(),
-            custom_engines: Vec::new(),
         }
     }
 }
@@ -307,7 +284,7 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Registers every engine (the catalog, then custom engines) and works
+/// Registers every engine in the catalog and works
 /// out the bar's engines and the engine the bar opens in.
 pub fn build_modes(config: &Config, index: SharedIndex, apps: SharedApps) -> Modes {
     build_modes_with(config, index, apps, None)
@@ -333,9 +310,6 @@ pub fn build_modes_with(
             })),
             (_, None) => unreachable!("every catalog engine is a website, Files or Apps"),
         }
-    }
-    for custom in &config.custom_engines {
-        registry.register(Box::new(WebSearchMode::custom(custom)));
     }
     let chips: Vec<usize> = config
         .chips()
@@ -591,34 +565,12 @@ background = \"wallpaper\"
         assert_eq!(m.registry.mode(m.default).id(), "google");
     }
 
-    fn crates() -> CustomEngine {
-        CustomEngine {
-            name: "Crates".into(),
-            url: "https://crates.io/search?q={query}".into(),
-        }
-    }
-
-    #[test]
-    fn custom_engines_are_registered_after_the_catalog() {
-        let mut c = Config::default();
-        c.remove_engine("wikipedia").unwrap();
-        c.add_custom(crates());
-        let m = build_modes(&c, Default::default(), Default::default());
-        assert_eq!(m.registry.len(), catalog::CATALOG.len() + 1);
-        assert_eq!(chip_ids(&m).last(), Some(&"custom:crates"));
-    }
-
     #[test]
     fn engines_know_their_search_address() {
-        let mut c = Config::default();
-        c.add_custom(crates());
+        let c = Config::default();
         assert_eq!(
             c.engine_url("github").as_deref(),
             Some("https://github.com/search?q={query}")
-        );
-        assert_eq!(
-            c.engine_url("custom:crates").as_deref(),
-            Some("https://crates.io/search?q={query}")
         );
         assert_eq!(c.engine_url("files"), None);
         assert_eq!(c.engine_url("apps"), None);
@@ -732,27 +684,25 @@ background = \"wallpaper\"
     }
 
     #[test]
-    fn custom_engines_join_the_bar_when_there_is_room_and_leave_with_delete() {
-        let mut c = Config::default();
-        c.remove_engine("wikipedia").unwrap();
-        c.add_custom(crates());
-        assert_eq!(c.chips().len(), 5);
-        let mut second = crates();
-        second.name = "Crates 2".into();
-        c.add_custom(second);
-        assert_eq!(c.custom_engines.len(), 2);
-        assert!(!c.chips().contains(&"custom:crates-2".to_owned()));
-        c.remove_custom("custom:crates");
-        assert_eq!(c.custom_engines.len(), 1);
-        assert_eq!(c.chips(), DEFAULT_ENGINES[..4]);
+    fn a_settings_file_with_own_engines_from_0_4_still_loads() {
+        // Flick 0.3 and 0.4 let people add their own engines; those are
+        // gone, and so are their chips.
+        let text = r#"
+engines = ["google", "custom:crates", "files"]
+
+[[custom_engines]]
+name = "Crates"
+url = "https://crates.io/search?q={query}"
+"#;
+        let c: Config = toml::from_str(text).unwrap();
+        assert_eq!(c.chips(), ["google", "files"]);
     }
 
     #[test]
-    fn engines_and_custom_engines_survive_saving() {
+    fn engines_survive_saving() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut c = Config::default();
-        c.add_custom(crates());
         c.move_engine(4, 0);
         save(&path, &c).unwrap();
         let (back, err) = load_or_create(&path);

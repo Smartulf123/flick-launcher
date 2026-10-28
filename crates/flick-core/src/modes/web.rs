@@ -1,8 +1,8 @@
-//! Web engines (Google, YouTube, GitHub, custom ones...): a row that
+//! Web engines (Google, YouTube, GitHub...): a row that
 //! searches what you typed, then (for engines that have them, when
 //! suggestions are on) the engine's suggestions as further rows.
 
-use crate::catalog::{self, CustomEngine, EngineSpec, Target};
+use crate::catalog::{self, EngineSpec, Target};
 use crate::mode::{Action, ResultItem, ResultKind, SearchMode};
 use crate::modes::suggest::{Engine, Suggestions};
 
@@ -28,17 +28,6 @@ impl WebSearchMode {
             engine: suggest,
             suggestions: None,
         })
-    }
-
-    /// An engine someone added; it has no suggestions.
-    pub fn custom(engine: &CustomEngine) -> Self {
-        Self {
-            id: engine.id(),
-            name: engine.name.clone(),
-            url: engine.url.clone(),
-            engine: None,
-            suggestions: None,
-        }
     }
 
     /// The catalog's engine with this id. Panics if it is not a website.
@@ -164,21 +153,6 @@ mod tests {
             Action::OpenUrl("https://github.com/search?q=egui".into())
         );
         assert!(WebSearchMode::from_spec(crate::catalog::find("files").unwrap()).is_none());
-    }
-
-    #[test]
-    fn custom_engines_search_their_address() {
-        let mode = WebSearchMode::custom(&crate::catalog::CustomEngine {
-            name: "Crates".into(),
-            url: "https://crates.io/search?q={query}".into(),
-        });
-        assert_eq!((mode.id(), mode.name()), ("custom:crates", "Crates"));
-        let r = mode.query("serde json", 8);
-        assert_eq!(r[0].title, "Search Crates for \"serde json\"");
-        assert_eq!(
-            r[0].action,
-            Action::OpenUrl("https://crates.io/search?q=serde%20json".into())
-        );
     }
 
     #[test]
