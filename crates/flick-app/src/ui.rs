@@ -743,6 +743,11 @@ impl FlickApp {
             self.apply_chip_change(change);
         }
 
+        // Handled before the "+" list below, which ends drawing early.
+        if let Some(i) = clicked_mode {
+            choose_chip(&mut self.picker, &mut self.launcher, i);
+        }
+
         // The engine list takes the place of the results while open.
         if self.picker.is_some() {
             ui.add_space(GAP as f32 * 0.8);
@@ -811,9 +816,6 @@ impl FlickApp {
 
         if let Some(i) = hovered_row {
             self.launcher.select(i);
-        }
-        if let Some(i) = clicked_mode {
-            self.launcher.select_chip(i);
         }
         if let Some(i) = clicked_row {
             self.launcher.select(i);
@@ -1107,6 +1109,13 @@ impl FlickApp {
             )));
         }
     }
+}
+
+/// Chip `i` was clicked: that engine answers the search box from now on,
+/// and the "+" list, if open, closes so the box searches again.
+fn choose_chip(picker: &mut Option<Picker>, launcher: &mut Launcher, i: usize) {
+    *picker = None;
+    launcher.select_chip(i);
 }
 
 /// A change made on the chip row, by position on the bar.
@@ -1599,6 +1608,16 @@ fn intent_for(key: Key, modifiers: Modifiers) -> Option<Intent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clicking_a_chip_while_the_list_is_open_closes_it_and_switches() {
+        let modes = config::build_modes(&Config::default(), Default::default(), Default::default());
+        let mut launcher = Launcher::new(modes, 8);
+        let mut picker = Some(Picker::default());
+        choose_chip(&mut picker, &mut launcher, 1);
+        assert!(picker.is_none());
+        assert_eq!(launcher.active_chip(), Some(1));
+    }
 
     #[test]
     fn messages_show_and_hide_the_bar() {
